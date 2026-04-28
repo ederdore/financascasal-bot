@@ -17,10 +17,10 @@ const { createClient } = require('@supabase/supabase-js');
 const fetch = require('node-fetch');
 
 // ── CONFIGURAÇÃO — preencha aqui ─────────────────────────
-const TELEGRAM_TOKEN = 'SEU_TOKEN_DO_BOTFATHER';
-const SUPABASE_URL   = 'https://SEU_PROJETO.supabase.co';
-const SUPABASE_ANON  = 'SUA_CHAVE_ANON_PUBLICA';
-const GROQ_API_KEY   = 'gsk_...SUA_CHAVE_GROQ...';
+const TELEGRAM_TOKEN = '8710272845:AAFCB8CAT2K3eHhIh7dJsyx-1VxgZCfEIs8';
+const SUPABASE_URL   = 'https://cpombcvppitlgynqzhsr.supabase.co';
+const SUPABASE_ANON  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwb21iY3ZwcGl0bGd5bnF6aHNyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MzEwMzYsImV4cCI6MjA5MjMwNzAzNn0.qb7WC2lGELaK5C8Ga09Bhs3tHDL04sW2SeY_SFMoZ1A';
+const GROQ_API_KEY   = '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';
 // ─────────────────────────────────────────────────────────
 
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
