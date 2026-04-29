@@ -1,10 +1,7 @@
 {
   "name": "financascasal-bot",
   "version": "1.0.0",
-  "main": "bot-telegram.js",
-  "scripts": {
-    "start": "node bot-telegram.js"
-  },
+  "scripts": { "start": "node bot-telegram.js" },
   "dependencies": {
     "node-telegram-bot-api": "^0.64.0",
     "@supabase/supabase-js": "^2.39.0"
