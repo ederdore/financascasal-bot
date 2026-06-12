@@ -90,39 +90,31 @@ const CAT_ICONS = { Alimentação:'🛒', Moradia:'🏠', Transporte:'🚗', Sa�
 
 // ── Groq ──────────────────────────────────────────────
 async function chamarGroq(prompt) {
-  return new Promise((resolve) => {
-    const body = JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
-      max_tokens: 300,
-      temperature: 0.1,
-      messages: [
-        { role: 'system', content: 'Consultor financeiro para casais brasileiros. Responda em português, direto.' },
-        { role: 'user', content: prompt },
-      ],
-    })
-    const req = https.request({
-      hostname: 'api.groq.com',
-      path: '/openai/v1/chat/completions',
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body),
         'Authorization': 'Bearer ' + GROQ_API_KEY,
       },
-    }, (res) => {
-      let data = ''
-      res.on('data', c => data += c)
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data)
-          resolve(json?.choices?.[0]?.message?.content || '')
-        } catch { resolve('') }
-      })
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        max_tokens: 300,
+        temperature: 0.1,
+        messages: [
+          { role: 'system', content: 'Consultor financeiro para casais brasileiros. Responda em português, direto.' },
+          { role: 'user', content: prompt },
+        ],
+      }),
     })
-    req.on('error', (e) => { console.error('Groq error:', e.message); resolve('') })
-    req.write(body)
-    req.end()
-  })
+    const data = await res.json()
+    console.log('[Groq status]', res.status)
+    if (!res.ok) { console.error('[Groq error]', JSON.stringify(data)); return '' }
+    return data?.choices?.[0]?.message?.content || ''
+  } catch(e) {
+    console.error('[Groq fetch error]', e.message)
+    return ''
+  }
 }
 
 async function interpretarMensagem(texto) {
