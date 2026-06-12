@@ -90,9 +90,8 @@ const CAT_ICONS = { Alimentação:'🛒', Moradia:'🏠', Transporte:'🚗', Sa�
 
 // ── Groq ──────────────────────────────────────────────
 async function chamarGroq(prompt) {
-  const res = await httpsPost('api.groq.com',
-    '/openai/v1/chat/completions',
-    {
+  return new Promise((resolve) => {
+    const body = JSON.stringify({
       model: 'llama-3.3-70b-versatile',
       max_tokens: 300,
       temperature: 0.1,
@@ -100,10 +99,30 @@ async function chamarGroq(prompt) {
         { role: 'system', content: 'Consultor financeiro para casais brasileiros. Responda em português, direto.' },
         { role: 'user', content: prompt },
       ],
-    },
-    { Authorization: `Bearer ${GROQ_API_KEY}` }
-  )
-  return res?.choices?.[0]?.message?.content || ''
+    })
+    const req = https.request({
+      hostname: 'api.groq.com',
+      path: '/openai/v1/chat/completions',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'Authorization': 'Bearer ' + GROQ_API_KEY,
+      },
+    }, (res) => {
+      let data = ''
+      res.on('data', c => data += c)
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data)
+          resolve(json?.choices?.[0]?.message?.content || '')
+        } catch { resolve('') }
+      })
+    })
+    req.on('error', (e) => { console.error('Groq error:', e.message); resolve('') })
+    req.write(body)
+    req.end()
+  })
 }
 
 async function interpretarMensagem(texto) {
