@@ -90,11 +90,6 @@ const CAT_ICONS = { Alimentação:'🛒', Moradia:'🏠', Transporte:'🚗', Sa�
 
 // ── Groq ──────────────────────────────────────────────
 async function chamarGroq(prompt) {
-
-  async function chamarGroq(prompt) {
-  console.log('[Groq] chamando com chave:', GROQ_API_KEY ? GROQ_API_KEY.substring(0,8) : 'VAZIA')
-  try {
-
   try {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
