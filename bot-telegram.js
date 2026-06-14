@@ -227,6 +227,140 @@ async function auditLog(userId, acao, detalhes = {}) {
   } catch { /* silencioso */ }
 }
 
+// ── Contexto do bot ───────────────────────────────────
+async function salvarContexto(casalCode, tipo, conteudo, dados = {}) {
+  try {
+    await supabase.from('bot_contextos').insert({
+      casal_code: casalCode, tipo, conteudo,
+      dados: dados,
+    })
+  } catch(e) { console.warn('salvarContexto:', e.message) }
+}
+
+async function carregarContexto(casalCode, limite = 20) {
+  try {
+    const { data } = await supabase.from('bot_contextos')
+      .select('tipo, conteudo, dados, created_at')
+      .eq('casal_code', casalCode)
+      .order('created_at', { ascending: false })
+      .limit(limite)
+    return data || []
+  } catch { return [] }
+}
+
+// Verifica se uma dica similar já foi enviada recentemente
+async function dicaJaEnviada(casalCode, categoria) {
+  try {
+    const { data } = await supabase.from('bot_contextos')
+      .select('conteudo')
+      .eq('casal_code', casalCode)
+      .eq('tipo', 'dica')
+      .ilike('conteudo', `%${categoria}%`)
+      .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+      .limit(1)
+    return (data || []).length > 0
+  } catch { return false }
+}
+
+// Busca respostas às reflexões para entender padrão de comportamento
+async function carregarPadraoRespostas(casalCode) {
+  try {
+    const { data } = await supabase.from('reflexoes_respondidas')
+      .select('resposta, padrao_id, created_at')
+      .eq('casal_code', casalCode)
+      .order('created_at', { ascending: false })
+      .limit(20)
+
+    const contagem = { sim_guardei: 0, vou_guardar: 0, nao_desta_vez: 0 }
+    ;(data || []).forEach(r => { if (contagem[r.resposta] !== undefined) contagem[r.resposta]++ })
+    const total = Object.values(contagem).reduce((s, v) => s + v, 0)
+
+    return {
+      total,
+      pctSim: total > 0 ? Math.round((contagem.sim_guardei / total) * 100) : 0,
+      pctNao: total > 0 ? Math.round((contagem.nao_desta_vez / total) * 100) : 0,
+      perfil: contagem.sim_guardei > contagem.nao_desta_vez ? 'disciplinado' : 'resistente',
+    }
+  } catch { return { total: 0, pctSim: 0, pctNao: 0, perfil: 'neutro' } }
+}
+
+// Verifica categorias acima da média e sugere meta
+async function verificarCategoriaAlta(user, chatId) {
+  try {
+    const now = new Date()
+    const mes = now.getMonth()
+    const ano = now.getFullYear()
+    const mesAnt = mes === 0 ? 11 : mes - 1
+    const anoAnt = mes === 0 ? ano - 1 : ano
+
+    const [atual, anterior] = await Promise.all([
+      supabase.from('despesas').select('valor,categoria').eq('casal_code', user.casal_code).eq('mes', mes).eq('ano', ano),
+      supabase.from('despesas').select('valor,categoria').eq('casal_code', user.casal_code).eq('mes', mesAnt).eq('ano', anoAnt),
+    ])
+
+    if (!atual.data?.length || !anterior.data?.length) return
+
+    // Agrupa por categoria
+    const catAtual = {}; (atual.data||[]).forEach(d => { catAtual[d.categoria] = (catAtual[d.categoria]||0) + d.valor })
+    const catAnt   = {}; (anterior.data||[]).forEach(d => { catAnt[d.categoria] = (catAnt[d.categoria]||0) + d.valor })
+
+    // Encontra categoria com maior aumento percentual
+    let maiorCat = null; let maiorDiff = 0; let maiorPct = 0
+    for (const [cat, val] of Object.entries(catAtual)) {
+      const ant = catAnt[cat] || 0
+      if (ant === 0) continue
+      const diff = val - ant
+      const pct  = (diff / ant) * 100
+      if (diff > 50 && pct > 20 && diff > maiorDiff) {
+        maiorDiff = diff; maiorCat = cat; maiorPct = pct
+      }
+    }
+
+    if (!maiorCat) return
+
+    // Verifica se já avisou hoje
+    const chave = `cat_alta_${user.id}_${maiorCat}_${now.toISOString().split('T')[0]}`
+    if (ctxMap.get(chave)) return
+    ctxMap.set(chave, true)
+
+    // Verifica se já tem meta para essa categoria
+    const { data: metaExist } = await supabase.from('metas')
+      .select('id').eq('casal_code', user.casal_code)
+      .ilike('nome', `%${maiorCat}%`).eq('ativa', true).maybeSingle()
+
+    const valAtual = catAtual[maiorCat]
+    const valAnt   = catAnt[maiorCat]
+
+    let msg = `📊 *Alerta de categoria*
+
+`
+    msg += `${CAT_ICONS[maiorCat]||'💸'} *${maiorCat}* está +${maiorPct.toFixed(0)}% acima do mês passado
+`
+    msg += `Mês passado: ${fmt(valAnt)} → Este mês: ${fmt(valAtual)}
+
+`
+
+    if (!metaExist) {
+      msg += `Querem criar uma meta de orçamento para ${maiorCat}?
+`
+      msg += `Sugestão: limitar em *${fmt(Math.round(valAnt * 1.1))}*/mês
+
+`
+      msg += `Responda *sim* para criar a meta agora`
+      ctxMap.set(`aguardando_meta_${user.id}`, {
+        categoria: maiorCat,
+        valorSugerido: Math.round(valAnt * 1.1),
+        expira: Date.now() + 2 * 60 * 60 * 1000,
+      })
+    } else {
+      msg += `💡 _Vocês já têm uma meta para ${maiorCat}. Verifiquem no app._`
+    }
+
+    await sendMessage(chatId, msg)
+    await salvarContexto(user.casal_code, 'alerta_categoria', msg, { categoria: maiorCat, diff: maiorDiff })
+  } catch(e) { console.warn('verificarCategoriaAlta:', e.message) }
+}
+
 // ── Reflexão proativa ─────────────────────────────────
 async function analisarPadroesUsuario(userId, cc) {
   try {
@@ -424,7 +558,8 @@ async function processUpdate(update) {
       await sendMessage(chatId, `Olá, *${user.nome}*! 🌿\n\nBem-vindo de volta ao Éden.\n\n${HELP}`)
     } else {
       await sendMessage(chatId,
-        `Olá! 🌿 Bem-vindo ao *Éden*!\n\n_Finanças a dois, sem segredos._\n\nPara começar, vincule sua conta:\n\n/vincular *seucodigodocasal*\n\nO código está no app em *Configurações → Casal*`
+        `Olá! 🌿 Bem-vindo ao *Éden*!\n\n_Finanças a dois, sem segredos._
+_Não para controlar — para planejar juntos._\n\nPara começar, vincule sua conta:\n\n/vincular *seucodigodocasal*\n\nO código está no app em *Configurações → Casal*`
       )
     }
     return
@@ -528,6 +663,32 @@ async function processUpdate(update) {
     return
   }
 
+  // ── Resposta a criação de meta ──
+  const ctxMeta = ctxMap.get(`aguardando_meta_${fromId}`)
+  if (ctxMeta && Date.now() < ctxMeta.expira && text.toLowerCase().trim() === 'sim') {
+    try {
+      const now = new Date()
+      await supabase.from('metas').insert({
+        user_id: user.id, casal_code: user.casal_code,
+        nome: `Orçamento ${ctxMeta.categoria}`,
+        descricao: `Meta de orçamento criada pelo bot`,
+        valor_alvo: ctxMeta.valorSugerido,
+        valor_atual: 0, atual: 0,
+        categoria: ctxMeta.categoria,
+        dono: 'casal', ativa: true, origem: 'bot',
+      })
+      ctxMap.delete(`aguardando_meta_${fromId}`)
+      await sendMessage(chatId, `✅ Meta criada!
+
+🎯 *Orçamento ${ctxMeta.categoria}*
+Limite: *${fmt(ctxMeta.valorSugerido)}/mês*
+
+Acompanhe no app em *Metas*. 🌿`)
+      await salvarContexto(user.casal_code, 'meta_criada', `Meta ${ctxMeta.categoria}`, { valor: ctxMeta.valorSugerido })
+    } catch(e) { await sendMessage(chatId, '❌ Erro ao criar meta: ' + e.message) }
+    return
+  }
+
   // ── Resposta a reflexão pendente ──
   const ctxReflexao = ctxMap.get(`aguardando_reflexao_${fromId}`)
   if (ctxReflexao && Date.now() < ctxReflexao.expira) {
@@ -585,10 +746,40 @@ async function processUpdate(update) {
       else if (item.quem === 'ela') resp += `👤 Ela\n`
       if (banco) resp += `\n🏦 ${banco.banco}: ${fmt(banco.novoSaldo)}`
 
-      // Dica da IA em background
-      chamarGroq(`Consultor financeiro. Despesa: "${item.descricao}" R$${item.valor} em ${item.categoria}. UMA dica prática em 1 frase curta (máx 12 palavras). Só a dica.`)
-        .then(dica => { if (dica?.trim()) sendMessage(chatId, `💡 _${dica.trim()}_`) })
-        .catch(() => {})
+      // Dica contextualizada em background
+      ;(async () => {
+        try {
+          // Verifica se dica similar foi enviada recentemente
+          const jaEnviou = await dicaJaEnviada(user.casal_code, item.categoria)
+          if (jaEnviou) return
+
+          // Carrega contexto histórico e padrão de respostas
+          const [ctx, padrao] = await Promise.all([
+            carregarContexto(user.casal_code, 10),
+            carregarPadraoRespostas(user.casal_code),
+          ])
+
+          const dicasAnteriores = ctx.filter(c => c.tipo === 'dica').map(c => c.conteudo).slice(0,3).join(' | ')
+          const perfilTexto = padrao.perfil === 'disciplinado'
+            ? `Casal disciplinado (${padrao.pctSim}% das reflexões resultaram em investimento)`
+            : padrao.pctNao > 50
+            ? `Casal com resistência a guardar (${padrao.pctNao}% de 'não desta vez')`
+            : 'Casal em desenvolvimento financeiro'
+
+          const prompt = `Consultor financeiro para casais brasileiros.
+Perfil: ${perfilTexto}
+Despesa: "${item.descricao}" R$${item.valor} em ${item.categoria}
+Objetivo do casal: ${user.objetivo || 'controle'}
+${dicasAnteriores ? 'Dicas recentes já enviadas (NÃO repita): ' + dicasAnteriores : ''}
+Gere UMA dica nova e personalizada em 1 frase (máx 12 palavras). Considere o perfil. Só a dica.`
+
+          const dica = await chamarGroq(prompt)
+          if (dica?.trim()) {
+            await sendMessage(chatId, `💡 _${dica.trim()}_`)
+            await salvarContexto(user.casal_code, 'dica', dica.trim(), { categoria: item.categoria, valor: item.valor })
+          }
+        } catch(e) { console.warn('dica:', e.message) }
+      })()
 
       await sendMessage(chatId, resp)
       await auditLog(user.id, 'lancar_despesa', { valor: item.valor, descricao: item.descricao })
