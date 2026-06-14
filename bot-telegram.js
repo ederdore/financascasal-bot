@@ -241,7 +241,7 @@ async function salvarContexto(casalCode, tipo, conteudo, dados = {}) {
 const MARCOS = [
   {
     lancamentos: 1,
-    msg: `🌱 *Primeiro lançamento!*
+    msg: `🫘 *Primeiro lançamento!*
 
 Vocês deram o primeiro passo. A IA começa a aprender o perfil de vocês agora.
 
@@ -249,7 +249,7 @@ _Quanto mais lançarem, mais personalizada ela fica._`,
   },
   {
     lancamentos: 10,
-    msg: `🌿 *IA evoluiu para Broto!*
+    msg: `🌱 *IA evoluiu para Broto!*
 
 Com 10 lançamentos, já consigo identificar suas categorias de gasto preferidas e dar dicas mais personalizadas.
 
@@ -257,7 +257,7 @@ _Continue lançando — em 30 lançamentos reconheço seus padrões semanais._`,
   },
   {
     lancamentos: 30,
-    msg: `🌳 *IA evoluiu para Crescendo!*
+    msg: `🌿 *IA evoluiu para Crescendo!*
 
 Com 30 lançamentos, já sei em quais dias da semana vocês costumam gastar mais e em quê.
 
@@ -267,7 +267,7 @@ _Próximo nível em 60 lançamentos: antecipação de comportamentos._`,
   },
   {
     lancamentos: 60,
-    msg: `🍃 *IA evoluiu para Florescendo!*
+    msg: `🌳 *IA evoluiu para Florescendo!*
 
 Incrível! 60 lançamentos de histórico. Agora consigo antecipar padrões de comportamento e alertar *antes* do gasto acontecer.
 
@@ -277,7 +277,7 @@ _Faltam 40 lançamentos para o nível máximo._`,
   },
   {
     lancamentos: 100,
-    msg: `🌺 *IA atingiu o nível Parceiro!*
+    msg: `🌟 *IA atingiu o nível Parceiro!*
 
 100 lançamentos. Agora sou um parceiro financeiro real do casal.
 
