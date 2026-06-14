@@ -237,6 +237,82 @@ async function salvarContexto(casalCode, tipo, conteudo, dados = {}) {
   } catch(e) { console.warn('salvarContexto:', e.message) }
 }
 
+// ── Marcos de maturidade ─────────────────────────────
+const MARCOS = [
+  {
+    lancamentos: 1,
+    msg: `🌱 *Primeiro lançamento!*
+
+Vocês deram o primeiro passo. A IA começa a aprender o perfil de vocês agora.
+
+_Quanto mais lançarem, mais personalizada ela fica._`,
+  },
+  {
+    lancamentos: 10,
+    msg: `🌿 *IA evoluiu para Broto!*
+
+Com 10 lançamentos, já consigo identificar suas categorias de gasto preferidas e dar dicas mais personalizadas.
+
+_Continue lançando — em 30 lançamentos reconheço seus padrões semanais._`,
+  },
+  {
+    lancamentos: 30,
+    msg: `🌳 *IA evoluiu para Crescendo!*
+
+Com 30 lançamentos, já sei em quais dias da semana vocês costumam gastar mais e em quê.
+
+Agora envio reflexões proativas no momento certo — antes de vocês gastarem.
+
+_Próximo nível em 60 lançamentos: antecipação de comportamentos._`,
+  },
+  {
+    lancamentos: 60,
+    msg: `🍃 *IA evoluiu para Florescendo!*
+
+Incrível! 60 lançamentos de histórico. Agora consigo antecipar padrões de comportamento e alertar *antes* do gasto acontecer.
+
+As reflexões ficam cada vez mais precisas e personalizadas para o perfil de vocês.
+
+_Faltam 40 lançamentos para o nível máximo._`,
+  },
+  {
+    lancamentos: 100,
+    msg: `🌺 *IA atingiu o nível Parceiro!*
+
+100 lançamentos. Agora sou um parceiro financeiro real do casal.
+
+Conheço seus padrões, antecipo comportamentos, personalizo cada reflexão e análise para o jeito único de vocês lidarem com dinheiro.
+
+_Finanças a dois, sem segredos. Não para controlar — para planejar juntos._ 🌿`,
+  },
+]
+
+async function verificarMarco(user, chatId) {
+  try {
+    const cc = user.casal_code
+    // Conta total de lançamentos
+    const [d, r] = await Promise.all([
+      supabase.from('despesas').select('id', { count: 'exact', head: true }).eq('casal_code', cc),
+      supabase.from('receitas').select('id', { count: 'exact', head: true }).eq('casal_code', cc),
+    ])
+    const total = (d.count || 0) + (r.count || 0)
+
+    // Verifica se algum marco foi atingido
+    for (const marco of MARCOS) {
+      if (total === marco.lancamentos) {
+        // Verifica se já enviou esse marco
+        const chave = `marco_${user.id}_${marco.lancamentos}`
+        if (ctxMap.get(chave)) return
+        ctxMap.set(chave, true)
+
+        await sendMessage(chatId, marco.msg)
+        await salvarContexto(cc, 'marco', `Marco ${marco.lancamentos} lançamentos`, { lancamentos: marco.lancamentos })
+        return
+      }
+    }
+  } catch(e) { console.warn('verificarMarco:', e.message) }
+}
+
 async function carregarContexto(casalCode, limite = 20) {
   try {
     const { data } = await supabase.from('bot_contextos')
@@ -787,6 +863,7 @@ Gere UMA dica nova e personalizada em 1 frase (máx 12 palavras). Considere o pe
 
       await sendMessage(chatId, resp)
       await auditLog(user.id, 'lancar_despesa', { valor: item.valor, descricao: item.descricao })
+      await verificarMarco(user, chatId)
       return
     }
 
@@ -796,6 +873,7 @@ Gere UMA dica nova e personalizada em 1 frase (máx 12 palavras). Considere o pe
       if (banco) resp += `\n🏦 ${banco.banco}: ${fmt(banco.novoSaldo)}`
       await sendMessage(chatId, resp)
       await auditLog(user.id, 'lancar_receita', { valor: item.valor })
+      await verificarMarco(user, chatId)
       return
     }
 
