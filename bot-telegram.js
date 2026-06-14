@@ -248,17 +248,21 @@ async function carregarContexto(casalCode, limite = 20) {
   } catch { return [] }
 }
 
-// Verifica se uma dica similar já foi enviada recentemente
+// Verifica se uma dica da mesma categoria já foi enviada recentemente
 async function dicaJaEnviada(casalCode, categoria) {
   try {
     const { data } = await supabase.from('bot_contextos')
-      .select('conteudo')
+      .select('dados')
       .eq('casal_code', casalCode)
       .eq('tipo', 'dica')
-      .ilike('conteudo', `%${categoria}%`)
       .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
-      .limit(1)
-    return (data || []).length > 0
+    // Verifica se alguma dica recente é da mesma categoria
+    return (data || []).some(d => {
+      try {
+        const dados = typeof d.dados === 'string' ? JSON.parse(d.dados) : d.dados
+        return dados?.categoria === categoria
+      } catch { return false }
+    })
   } catch { return false }
 }
 
