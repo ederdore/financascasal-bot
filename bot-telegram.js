@@ -18,6 +18,12 @@ const SUPABASE_ANON  = process.env.SUPABASE_ANON
 const GROQ_API_KEY   = process.env.GROQ_API_KEY
 const PORT           = process.env.PORT || 3000
 
+// Cartão e banco principal do casal
+const CARTAO_PRINCIPAL = {
+  id:   process.env.CARTAO_PRINCIPAL_ID   || 'f3b9f1fa-2832-4f79-97c5-77473b182190',
+  nome: process.env.CARTAO_PRINCIPAL_NOME || 'Cartão Inter',
+}
+
 if (!TELEGRAM_TOKEN) console.error('⚠️  TELEGRAM_TOKEN não configurado')
 if (!SUPABASE_URL)   console.error('⚠️  SUPABASE_URL não configurado')
 if (!GROQ_API_KEY)   console.error('⚠️  GROQ_API_KEY não configurado')
@@ -160,16 +166,35 @@ async function getResumo(user) {
   }
 }
 
-async function lancarDespesa(user, valor, descricao, categoria, quem) {
+async function lancarDespesa(user, valor, descricao, categoria, quem, pagamentoTipo = 'debito', cartaoId = null) {
   const now = new Date()
   const cc  = user.casal_code || user.id
   const { data: bancos } = await supabase.from('contas_banco').select('*').eq('casal_code', cc)
   const banco = bancos?.find(b => b.id === user.banco_principal_id) || bancos?.[0]
 
+  // Cartão de crédito — aumenta fatura, NÃO debita banco
+  if (pagamentoTipo === 'cartao') {
+    const cid = cartaoId || CARTAO_PRINCIPAL.id
+    const { data: cartao } = await supabase.from('cartoes').select('*').eq('id', cid).maybeSingle()
+    const novaFatura = (cartao?.fatura || 0) + valor
+
+    await supabase.from('despesas').insert({
+      user_id: user.id, casal_code: cc,
+      nome: descricao, valor, categoria: categoria || 'Outros',
+      quem: quem || user.papel, tipo: 'variavel', pagamento_tipo: 'cartao',
+      cartao_id: cid, cartao_nome: cartao?.nome || CARTAO_PRINCIPAL.nome,
+      mes: now.getMonth(), ano: now.getFullYear(),
+    })
+
+    await supabase.from('cartoes').update({ fatura: novaFatura }).eq('id', cid)
+    return { tipo: 'cartao', cartaoNome: cartao?.nome || CARTAO_PRINCIPAL.nome, novaFatura }
+  }
+
+  // Débito/PIX — debita banco imediatamente
   await supabase.from('despesas').insert({
     user_id: user.id, casal_code: cc,
     nome: descricao, valor, categoria: categoria || 'Outros',
-    quem: quem || user.papel, tipo: 'variavel', pagamento_tipo: 'debito',
+    quem: quem || user.papel, tipo: 'variavel', pagamento_tipo: pagamentoTipo,
     banco_id: banco?.id || null, banco_nome: banco?.banco || '',
     mes: now.getMonth(), ano: now.getFullYear(),
   })
@@ -184,7 +209,7 @@ async function lancarDespesa(user, valor, descricao, categoria, quem) {
       saldo_apos: novoSaldo,
       mes: now.getMonth(), ano: now.getFullYear(),
     })
-    return { ...banco, novoSaldo }
+    return { tipo: 'debito', bancoNome: banco.banco, novoSaldo }
   }
   return null
 }
@@ -741,6 +766,73 @@ _Não para controlar — para planejar juntos._\n\nPara começar, vincule sua co
   if (!user) {
     await sendMessage(chatId, '⚠️ Conta não vinculada.\n\nUse: /vincular *seucodigo*\n\nO código está no app em *Configurações → Casal*')
     return
+  }
+
+  // ── Resposta a forma de pagamento ──
+  const ctxPag = ctxMap.get(`pagamento_${fromId}`)
+  if (ctxPag && Date.now() < ctxPag.expira) {
+    const opcoes = { '1': 'debito', '2': 'cartao', '3': 'pix', '4': 'dinheiro' }
+    const pagTipo = opcoes[text.trim()]
+
+    if (pagTipo) {
+      ctxMap.delete(`pagamento_${fromId}`)
+      const { item } = ctxPag
+      const icon = CAT_ICONS[item.categoria] || '💸'
+
+      const resultado = await lancarDespesa(
+        user, item.valor, item.descricao, item.categoria, item.quem,
+        pagTipo === 'pix' ? 'debito' : pagTipo,
+        pagTipo === 'cartao' ? CARTAO_PRINCIPAL.id : null
+      )
+
+      let resp = `${icon} *${item.descricao}*
+✅ ${fmt(item.valor)} lançado!
+📂 ${item.categoria || 'Outros'}
+`
+
+      if (pagTipo === 'cartao' && resultado) {
+        resp += `
+💳 ${resultado.cartaoNome}
+📊 Nova fatura: ${fmt(resultado.novaFatura)}
+`
+        resp += `
+💡 _Lançado na fatura — banco não debitado ainda_`
+      } else if (resultado?.novoSaldo !== undefined) {
+        resp += `
+🏦 ${resultado.bancoNome}: ${fmt(resultado.novoSaldo)}`
+      } else if (pagTipo === 'dinheiro') {
+        resp += `
+💵 _Pago em dinheiro — sem impacto no banco_`
+      }
+
+      await sendMessage(chatId, resp)
+      await auditLog(user.id, 'lancar_despesa', { valor: item.valor, descricao: item.descricao, pagamento: pagTipo })
+      await verificarMarco(user, chatId)
+
+      // Dica em background
+      ;(async () => {
+        try {
+          const jaEnviou = await dicaJaEnviada(user.casal_code, item.categoria)
+          if (jaEnviou) return
+          const [ctx, padrao] = await Promise.all([
+            carregarContexto(user.casal_code, 10),
+            carregarPadraoRespostas(user.casal_code),
+          ])
+          const dicasAnteriores = ctx.filter(c => c.tipo === 'dica').map(c => c.conteudo).slice(0,3).join(' | ')
+          const perfilTexto = padrao.perfil === 'disciplinado' ? `Casal disciplinado (${padrao.pctSim}% investe)` : `Casal em desenvolvimento`
+          const prompt = `Consultor financeiro. Perfil: ${perfilTexto}. Despesa: "${item.descricao}" R$${item.valor} em ${item.categoria} via ${pagTipo}. Objetivo: ${user.objetivo || 'controle'}. ${dicasAnteriores ? 'Não repita: ' + dicasAnteriores : ''} UMA dica nova em 1 frase (máx 12 palavras). Só a dica.`
+          const dica = await chamarGroq(prompt)
+          if (dica?.trim()) {
+            await sendMessage(chatId, `💡 _${dica.trim()}_`)
+            await salvarContexto(user.casal_code, 'dica', dica.trim(), { categoria: item.categoria, valor: item.valor })
+          }
+        } catch(e) { console.warn('dica:', e.message) }
+      })()
+      return
+    } else {
+      await sendMessage(chatId, 'Responda com 1, 2, 3 ou 4 para confirmar o pagamento. Ou envie outra mensagem para cancelar.')
+      ctxMap.delete(`pagamento_${fromId}`)
+    }
   }
 
   // ── Resposta a criação de meta ──
