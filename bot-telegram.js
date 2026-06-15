@@ -809,6 +809,14 @@ _Não para controlar — para planejar juntos._\n\nPara começar, vincule sua co
       await auditLog(user.id, 'lancar_despesa', { valor: item.valor, descricao: item.descricao, pagamento: pagTipo })
       await verificarMarco(user, chatId)
 
+      // Evento: primeiro registro via Telegram
+      try {
+        await supabase.from('eventos_usuario').insert({
+          user_id: user.id, casal_code: user.casal_code,
+          evento: 'primeiro_telegram', dados: { canal: 'telegram', tipo: pagTipo },
+        })
+      } catch { /* já registrado */ }
+
       // Dica em background
       ;(async () => {
         try {
