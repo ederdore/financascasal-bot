@@ -817,30 +817,93 @@ _Não para controlar — para planejar juntos._\n\nPara começar, vincule sua co
         })
       } catch { /* já registrado */ }
 
-      // Dica em background
-      ;(async () => {
-        try {
-          const jaEnviou = await dicaJaEnviada(user.casal_code, item.categoria)
-          if (jaEnviou) return
-          const [ctx, padrao] = await Promise.all([
-            carregarContexto(user.casal_code, 10),
-            carregarPadraoRespostas(user.casal_code),
-          ])
-          const dicasAnteriores = ctx.filter(c => c.tipo === 'dica').map(c => c.conteudo).slice(0,3).join(' | ')
-          const perfilTexto = padrao.perfil === 'disciplinado' ? `Casal disciplinado (${padrao.pctSim}% investe)` : `Casal em desenvolvimento`
-          const prompt = `Consultor financeiro. Perfil: ${perfilTexto}. Despesa: "${item.descricao}" R$${item.valor} em ${item.categoria} via ${pagTipo}. Objetivo: ${user.objetivo || 'controle'}. ${dicasAnteriores ? 'Não repita: ' + dicasAnteriores : ''} UMA dica nova em 1 frase (máx 12 palavras). Só a dica.`
-          const dica = await chamarGroq(prompt)
-          if (dica?.trim()) {
-            await sendMessage(chatId, `💡 _${dica.trim()}_`)
-            await salvarContexto(user.casal_code, 'dica', dica.trim(), { categoria: item.categoria, valor: item.valor })
-          }
-        } catch(e) { console.warn('dica:', e.message) }
-      })()
+      // Pergunta se foi planejado
+      const chavePlan = `planejado_${fromId}`
+      ctxMap.set(chavePlan, {
+        item, pagTipo, expira: Date.now() + 10 * 60 * 1000,
+      })
+      await sendMessage(chatId, `Era uma compra planejada?\n\n1️⃣ Sim, estava no plano\n2️⃣ Não, foi impulsiva`)
       return
     } else {
       await sendMessage(chatId, 'Responda com 1, 2, 3 ou 4 para confirmar o pagamento. Ou envie outra mensagem para cancelar.')
       ctxMap.delete(`pagamento_${fromId}`)
     }
+  }
+
+  // ── Resposta a compra planejada ou não ──
+  const ctxPlan = ctxMap.get(`planejado_${fromId}`)
+  if (ctxPlan && Date.now() < ctxPlan.expira && (text.trim() === '1' || text.trim() === '2')) {
+    const foiPlanejada = text.trim() === '1'
+    ctxMap.delete(`planejado_${fromId}`)
+    const { item, pagTipo } = ctxPlan
+
+    // Salva contexto de comportamento
+    await salvarContexto(user.casal_code, 'comportamento', foiPlanejada ? 'planejada' : 'impulsiva', {
+      categoria: item.categoria, valor: item.valor, descricao: item.descricao,
+    })
+
+    // Busca metas e reserva para contexto da dica
+    ;(async () => {
+      try {
+        const jaEnviou = await dicaJaEnviada(user.casal_code, item.categoria)
+
+        const [ctx, padrao, metasData, reservaData] = await Promise.all([
+          carregarContexto(user.casal_code, 15),
+          carregarPadraoRespostas(user.casal_code),
+          supabase.from('metas').select('nome,valor_alvo,valor_atual,atual').eq('casal_code', user.casal_code).eq('ativa', true).limit(3),
+          supabase.from('reserva').select('atual,meta').eq('user_id', user.id).maybeSingle(),
+        ])
+
+        const metas = metasData.data || []
+        const reserva = reservaData.data
+        const pctReserva = reserva?.meta > 0 ? Math.round((reserva.atual / reserva.meta) * 100) : 0
+
+        // Contexto de metas para a IA
+        const ctxMetas = metas.map(m => {
+          const atual = m.valor_atual || m.atual || 0
+          const pct = m.valor_alvo > 0 ? Math.round((atual / m.valor_alvo) * 100) : 0
+          const falta = m.valor_alvo - atual
+          return `${m.nome}: ${pct}% (falta ${fmt(falta)})`
+        }).join(', ')
+
+        // Contexto de comportamento impulsivo
+        const comprasImpulsivas = ctx.filter(c => c.tipo === 'comportamento' && c.conteudo === 'impulsiva').length
+        const totalCompras = ctx.filter(c => c.tipo === 'comportamento').length
+        const pctImpulsivo = totalCompras > 0 ? Math.round((comprasImpulsivas / totalCompras) * 100) : 0
+
+        const dicasAnteriores = ctx.filter(c => c.tipo === 'dica').map(c => c.conteudo).slice(0,3).join(' | ')
+        const perfilTexto = padrao.perfil === 'disciplinado'
+          ? `Casal disciplinado (${padrao.pctSim}% investe nas reflexões)`
+          : `Casal em desenvolvimento (${padrao.pctNao}% resistência)`
+
+        const prompt = `Consultor financeiro para casais brasileiros.
+Perfil: ${perfilTexto}
+Compra: "${item.descricao}" R$${item.valor} em ${item.categoria} via ${pagTipo}
+Foi planejada: ${foiPlanejada ? 'SIM' : 'NÃO — foi impulsiva'}
+${pctImpulsivo > 0 ? `Histórico: ${pctImpulsivo}% das compras recentes foram impulsivas` : ''}
+Reserva de emergência: ${pctReserva}% completa${pctReserva < 50 ? ' (abaixo do ideal)' : ''}
+Metas ativas: ${ctxMetas || 'nenhuma cadastrada'}
+Objetivo do casal: ${user.objetivo || 'controle'}
+${dicasAnteriores ? 'Dicas recentes (NÃO repita): ' + dicasAnteriores : ''}
+
+Regras:
+- NÃO mande parar de gastar
+- Se reserva < 50%: sugira um pequeno aporte na reserva, de forma gentil
+- Se tem metas: mencione quanto falta e quanto por mês para chegar lá
+- Se compra impulsiva: acolha sem punir, sugira reflexão
+- Se compra planejada: elogie e reforce o comportamento
+- Máx 2 frases curtas e diretas. Só a dica, sem título.`
+
+        if (!jaEnviou || !foiPlanejada) {
+          const dica = await chamarGroq(prompt)
+          if (dica?.trim()) {
+            await sendMessage(chatId, `💡 _${dica.trim()}_`)
+            await salvarContexto(user.casal_code, 'dica', dica.trim(), { categoria: item.categoria, valor: item.valor, planejada: foiPlanejada })
+          }
+        }
+      } catch(e) { console.warn('dica planejado:', e.message) }
+    })()
+    return
   }
 
   // ── Resposta a criação de meta ──
@@ -918,41 +981,31 @@ Acompanhe no app em *Metas*. 🌿`)
     if (item.tipo === 'ajuda') { await sendMessage(chatId, HELP); return }
 
     if (item.tipo === 'despesa' && item.valor && item.valor > 0) {
-      const banco = await lancarDespesa(user, item.valor, item.descricao || text, item.categoria, item.quem)
-      const icon  = CAT_ICONS[item.categoria] || '💸'
-      let resp = `${icon} *${item.descricao || text}*\n✅ ${fmt(item.valor)} lançado!\n`
-      if (item.categoria) resp += `📂 ${item.categoria}\n`
-      if (item.quem === 'casal') resp += `👫 Casal (50/50)\n`
-      else if (item.quem === 'ela') resp += `👤 Ela\n`
-      if (banco) resp += `\n🏦 ${banco.banco}: ${fmt(banco.novoSaldo)}`
+      // Pergunta forma de pagamento
+      const chavePag = `pagamento_${fromId}`
+      ctxMap.set(chavePag, {
+        item, expira: Date.now() + 5 * 60 * 1000,
+      })
+      const icon = CAT_ICONS[item.categoria] || '💸'
+      const msg = `${icon} *${item.descricao || text}*\n💰 ${fmt(item.valor)} · ${item.categoria || 'Outros'}\n\nComo foi pago?\n\n1️⃣ Débito (debita banco agora)\n2️⃣ Cartão Inter (vai para a fatura)\n3️⃣ PIX (debita banco agora)\n4️⃣ Dinheiro (não afeta banco)`
+      await sendMessage(chatId, msg)
+      return
+    }
 
+    if (false) { // placeholder removido
+      const banco = null
       // Dica contextualizada em background
       ;(async () => {
         try {
-          // Verifica se dica similar foi enviada recentemente
           const jaEnviou = await dicaJaEnviada(user.casal_code, item.categoria)
           if (jaEnviou) return
-
-          // Carrega contexto histórico e padrão de respostas
           const [ctx, padrao] = await Promise.all([
             carregarContexto(user.casal_code, 10),
             carregarPadraoRespostas(user.casal_code),
           ])
-
           const dicasAnteriores = ctx.filter(c => c.tipo === 'dica').map(c => c.conteudo).slice(0,3).join(' | ')
-          const perfilTexto = padrao.perfil === 'disciplinado'
-            ? `Casal disciplinado (${padrao.pctSim}% das reflexões resultaram em investimento)`
-            : padrao.pctNao > 50
-            ? `Casal com resistência a guardar (${padrao.pctNao}% de 'não desta vez')`
-            : 'Casal em desenvolvimento financeiro'
-
-          const prompt = `Consultor financeiro para casais brasileiros.
-Perfil: ${perfilTexto}
-Despesa: "${item.descricao}" R$${item.valor} em ${item.categoria}
-Objetivo do casal: ${user.objetivo || 'controle'}
-${dicasAnteriores ? 'Dicas recentes já enviadas (NÃO repita): ' + dicasAnteriores : ''}
-Gere UMA dica nova e personalizada em 1 frase (máx 12 palavras). Considere o perfil. Só a dica.`
-
+          const perfilTexto = 'Casal em desenvolvimento financeiro'
+          const prompt = ''
           const dica = await chamarGroq(prompt)
           if (dica?.trim()) {
             await sendMessage(chatId, `💡 _${dica.trim()}_`)
