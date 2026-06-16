@@ -741,7 +741,52 @@ async function processUpdate(update) {
     if (profile.telegram_id&&profile.telegram_id!==String(fromId)) { await sendMessage(chatId,'⚠️ Este código já está vinculado a outro Telegram.'); return }
     await supabase.from('profiles').update({ telegram_id:String(fromId) }).eq('id',profile.id)
     await auditLog(profile.id,'vincular_telegram',{telegram_id:fromId})
-    await sendMessageButtons(chatId,`✅ *Conta vinculada!*\n\nOlá, *${profile.nome}*! 🌿\n\nO que deseja fazer?`, menuPrincipal())
+
+    // ── Mensagem de onboarding rica ──
+    await sendMessage(chatId, `🌿 *Bem-vindo ao Éden, ${profile.nome}!*
+
+Sou o *Broto* — seu consultor financeiro familiar.
+
+Estou aqui para ajudar vocês a:
+🌱 Registrar gastos sem esforço
+📊 Entender para onde o dinheiro vai
+🎯 Acompanhar metas e reserva
+💡 Receber insights personalizados
+
+Quanto mais interagirem, mais aprendo sobre o perfil financeiro do casal.
+
+_Finanças a dois, sem segredos._
+_Não para controlar — para planejar juntos._ 🌿`)
+
+    await new Promise(r => setTimeout(r, 800))
+    await sendMessageButtons(chatId, `Para começar, diga o que gastaram ou escolha uma opção:`, menuPrincipal())
+
+    // Follow-up 24h se não lançar nada
+    setTimeout(async () => {
+      try {
+        const userAtual = await getUser(fromId)
+        if (!userAtual || userAtual.notif_onboarding === false) return
+        const { data: lancs } = await supabase.from('despesas')
+          .select('id', { count:'exact', head:true })
+          .eq('casal_code', profile.casal_code)
+          .gte('created_at', new Date(Date.now()-24*60*60*1000).toISOString())
+        if (!lancs?.length) {
+          await sendMessage(chatId, `🌱 *Oi, ${profile.nome}!*
+
+Ainda não registraram nenhum gasto hoje.
+
+Sabia que casais que registram gastos diariamente têm 3x mais clareza financeira?
+
+Tente agora:
+_"gastei 50 no mercado"_
+_"paguei 120 gasolina"_`)
+          await sendMessageButtons(chatId, `Como posso ajudar?`, [
+            [{ text:'📈 Ver meu jardim', callback_data:'menu_jardim' },{ text:'💸 Lançar gasto', callback_data:'menu_gasto' }],
+          ])
+        }
+      } catch(e) { console.warn('followup onboarding:', e.message) }
+    }, 24*60*60*1000)
+
     return
   }
 
@@ -961,10 +1006,11 @@ const server = require('http').createServer((req,res) => {
 const _origProcess = processUpdate
 // já integrado acima
 
-// Verificação noturna
+// Verificação noturna + saúde semanal
 setInterval(async () => {
-  try { await verificarDiaSemGasto() } catch(e) { console.warn('cron:',e.message) }
-}, 60*60*1000)
+  try { await verificarDiaSemGasto() } catch(e) { console.warn('cron diario:',e.message) }
+  try { await enviarSaudesSemanal() } catch(e) { console.warn('cron semanal:',e.message) }
+}, 60*60*1000) // a cada 1 hora
 
 server.listen(PORT, async () => {
   console.log(`🌿 Éden Bot na porta ${PORT}`)
