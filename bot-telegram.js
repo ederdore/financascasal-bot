@@ -1040,6 +1040,141 @@ Acompanhe no app em *Metas*. 🌿`)
 }
 
 // ── Servidor HTTP ─────────────────────────────────────
+
+// ── Verificação noturna — dia sem gasto ──────────────
+async function verificarDiaSemGasto() {
+  try {
+    const now = new Date()
+    const hora = now.getHours()
+
+    // Só roda entre 21h e 23h
+    if (hora < 21 || hora > 23) return
+
+    // Busca todos os usuários ativos (com telegram_id)
+    const { data: usuarios } = await supabase
+      .from('profiles')
+      .select('id, nome, casal_code, telegram_id, objetivo')
+      .not('telegram_id', 'is', null)
+
+    if (!usuarios?.length) return
+
+    // Agrupa por casal para não duplicar
+    const casaisVistos = new Set()
+
+    for (const user of usuarios) {
+      if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
+      casaisVistos.add(user.casal_code)
+
+      const chatId = user.telegram_id
+      if (!chatId) continue
+
+      // Verifica se já enviou mensagem hoje para esse casal
+      const chaveHoje = `dia_sem_gasto_${user.casal_code}_${now.toISOString().split('T')[0]}`
+      if (ctxMap.get(chaveHoje)) continue
+
+      const mes = now.getMonth()
+      const ano = now.getFullYear()
+      const hoje = now.getDate()
+
+      // Gastos de hoje
+      const { data: gastosHoje } = await supabase
+        .from('despesas')
+        .select('valor')
+        .eq('casal_code', user.casal_code)
+        .eq('mes', mes)
+        .eq('ano', ano)
+        .gte('created_at', new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString())
+
+      const totalHoje = (gastosHoje || []).reduce((s, d) => s + d.valor, 0)
+
+      // Média diária dos últimos 30 dias
+      const { data: gastosUltimos30 } = await supabase
+        .from('despesas')
+        .select('valor')
+        .eq('casal_code', user.casal_code)
+        .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+
+      const totalUltimos30 = (gastosUltimos30 || []).reduce((s, d) => s + d.valor, 0)
+      const mediaDiaria = totalUltimos30 / 30
+
+      // Dias consecutivos sem gasto
+      let diasSemGasto = 0
+      for (let i = 1; i <= 7; i++) {
+        const dia = new Date(Date.now() - i * 24 * 60 * 60 * 1000)
+        const { data: gastosDia } = await supabase
+          .from('despesas')
+          .select('id', { count: 'exact', head: true })
+          .eq('casal_code', user.casal_code)
+          .gte('created_at', new Date(dia.getFullYear(), dia.getMonth(), dia.getDate()).toISOString())
+          .lt('created_at', new Date(dia.getFullYear(), dia.getMonth(), dia.getDate() + 1).toISOString())
+        if ((gastosDia?.length || 0) === 0) diasSemGasto++
+        else break
+      }
+
+      let msg = null
+
+      // Cenário 1 — Dia sem gasto
+      if (totalHoje === 0 && mediaDiaria > 0) {
+        const economizado = Math.round(mediaDiaria)
+        msg = `🌿 *Dia sem gastos!*
+
+`
+        msg += `A média diária de vocês é ${fmt(economizado)}.
+`
+
+        if (diasSemGasto >= 2) {
+          msg += `
+🏆 *${diasSemGasto + 1} dias consecutivos sem gastar!*
+`
+          if (diasSemGasto >= 3) {
+            msg += `Querem tentar chegar a ${diasSemGasto + 2} dias? 💪
+`
+          }
+        }
+
+        // Sugere aporte na reserva
+        const { data: reserva } = await supabase
+          .from('reserva')
+          .select('atual, meta')
+          .eq('user_id', user.id)
+          .maybeSingle()
+
+        if (reserva && reserva.atual < reserva.meta) {
+          const pct = Math.round((reserva.atual / reserva.meta) * 100)
+          const sugestao = Math.min(Math.round(economizado * 0.5), reserva.meta - reserva.atual)
+          msg += `
+🛡 Sua reserva está em ${pct}%. `
+          msg += `Que tal guardar ${fmt(sugestao)} hoje?
+`
+          msg += `_Pequenos aportes constroem jardins sólidos._`
+        } else {
+          msg += `
+_Cada dia sem gasto é uma semente plantada no jardim._ 🌱`
+        }
+      }
+
+      // Cenário 2 — Gasto muito abaixo da média (menos de 30%)
+      else if (totalHoje > 0 && mediaDiaria > 0 && totalHoje < mediaDiaria * 0.3) {
+        const economia = Math.round(mediaDiaria - totalHoje)
+        msg = `✨ *Dia econômico!*
+
+`
+        msg += `Gastaram ${fmt(totalHoje)} hoje — ${Math.round((totalHoje/mediaDiaria)*100)}% da média diária.
+`
+        msg += `Uma diferença de ${fmt(economia)} em relação ao dia típico. 🌿`
+      }
+
+      if (msg) {
+        ctxMap.set(chaveHoje, true)
+        await sendMessage(chatId, msg)
+        await salvarContexto(user.casal_code, 'nudge_dia', msg, {
+          totalHoje, mediaDiaria: Math.round(mediaDiaria), diasSemGasto
+        })
+      }
+    }
+  } catch(e) { console.warn('verificarDiaSemGasto:', e.message) }
+}
+
 const server = require('http').createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/webhook') {
     let body = ''
@@ -1057,6 +1192,11 @@ const server = require('http').createServer((req, res) => {
     ts: new Date().toISOString(),
   }))
 })
+
+// Verificação noturna a cada hora
+setInterval(async () => {
+  try { await verificarDiaSemGasto() } catch(e) { console.warn('cron:', e.message) }
+}, 60 * 60 * 1000) // a cada 1 hora
 
 server.listen(PORT, async () => {
   console.log(`🌿 Éden Bot na porta ${PORT}`)
