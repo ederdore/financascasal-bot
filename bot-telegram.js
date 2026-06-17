@@ -1016,6 +1016,7 @@ const _origProcess = processUpdate
 // Verificação noturna + saúde semanal
 setInterval(async () => {
   try { await verificarDiaSemGasto() } catch(e) { console.warn('cron diario:',e.message) }
+  try { await verificarReflexaoGlobal() } catch(e) { console.warn('cron reflexao:',e.message) }
   try { await enviarSaudesSemanal() } catch(e) { console.warn('cron semanal:',e.message) }
 }, 60*60*1000) // a cada 1 hora
 
