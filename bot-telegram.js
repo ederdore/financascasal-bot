@@ -472,6 +472,7 @@ Dê UMA insight financeiro personalizado e motivador em 2-3 frases. Use metáfor
     await verificarMarco(user, chatId)
     try { await supabase.from('eventos_usuario').insert({user_id:user.id,casal_code:user.casal_code,evento:'primeiro_telegram',dados:{canal:'telegram',tipo:pagTipo}}) } catch {}
     // Pergunta planejado
+    // Find the fromId from the original message — use chatId as fallback for DM chats
     ctxMap.set(`planejado_${chatId}`, { item, pagTipo, expira: Date.now()+10*60*1000 })
     await sendMessageButtons(chatId, `Era uma compra planejada?`, [
       [{ text:'✅ Sim, estava no plano', callback_data:'plan_sim' }],
@@ -483,16 +484,21 @@ Dê UMA insight financeiro personalizado e motivador em 2-3 frases. Use metáfor
   // ── Callbacks de planejado ──
   if (callbackData === 'plan_sim' || callbackData === 'plan_nao') {
     const foiPlanejada = callbackData === 'plan_sim'
-    // Find pending planejado context
-    let foundKey = null, foundCtx = null
-    for (const [k,v] of ctxMap.entries()) {
-      if (k.startsWith('planejado_') && v.item && Date.now() < v.expira) {
-        foundKey = k; foundCtx = v; break
-      }
-    }
-    if (foundCtx) {
-      ctxMap.delete(foundKey)
+    // Look for context by chatId (DM = chatId equals userId)
+    const ctxKey = `planejado_${chatId}`
+    const foundCtx = ctxMap.get(ctxKey)
+    if (foundCtx && Date.now() < foundCtx.expira) {
+      ctxMap.delete(ctxKey)
       await processarPlanejado(foiPlanejada, foundCtx, user, chatId, chatId)
+    } else {
+      // Fallback — search all pending
+      for (const [k,v] of ctxMap.entries()) {
+        if (k.startsWith('planejado_') && v.item && Date.now() < v.expira) {
+          ctxMap.delete(k)
+          await processarPlanejado(foiPlanejada, v, user, chatId, chatId)
+          break
+        }
+      }
     }
     return
   }
@@ -945,6 +951,7 @@ _"paguei 120 gasolina"_`)
 // ── Processar resposta planejado/impulsivo ────────────
 async function processarPlanejado(foiPlanejada, ctxPlan, user, chatId, fromId) {
   ctxMap.delete(`planejado_${fromId}`)
+  ctxMap.delete(`planejado_${chatId}`) // cleanup both keys
   const { item, pagTipo } = ctxPlan
   await salvarContexto(user.casal_code,'comportamento',foiPlanejada?'planejada':'impulsiva',{categoria:item.categoria,valor:item.valor,descricao:item.descricao})
   ;(async () => {
