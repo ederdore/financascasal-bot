@@ -1038,25 +1038,19 @@ async function enviarSaudesSemanal() {
       const fase=fases.find(f=>score>=f.min&&score<f.max)||fases[4]
       const prompt=`Consultor financeiro para casais brasileiros. Semana: gastaram ${fmt(totalDesp)}, receitas ${fmt(totalRec)}, saldo ${fmt(saldo)}. Top categorias: ${top3.map(([c,v])=>`${c}: ${fmt(v)}`).join(', ')}. Reserva: ${pctRes}%. Objetivo: ${user.objetivo||'controle'}. Gere UMA mensagem motivadora de no máximo 2 frases sobre o jardim financeiro. Use metáforas de jardim.`
       const dica=await chamarGroq(prompt)
-      let msg=`${fase.e} *Como está seu jardim esta semana?*
-
-🌡 Saúde: *${score}%* — ${fase.nome}
-
-📊 *Resumo da semana:*
-💰 Receitas: ${fmt(totalRec)}
-💸 Gastos: ${fmt(totalDesp)}
-${saldo>=0?'✅':'🔴'} Saldo: *${fmt(saldo)}*
-
-`
-      if (top3.length>0) { msg+=`🏆 *Top 3 gastos:*
-`; top3.forEach(([cat,val],i)=>{msg+=`${i+1}. ${CAT_ICONS[cat]||'💸'} ${cat}: ${fmt(val)}
-`}); msg+='
-' }
-      msg+=`🛡 Reserva: ${fmt(reservaD.atual)} (${pctRes}%)
-
-`
-      if (dica?.trim()) msg+=`💡 *Broto diz:*
-_${dica.trim()}_`
+      let msg = fase.e + ' *Como está seu jardim esta semana?*\n\n'
+      msg += '\U0001f321 Saúde: *' + score + '%* \u2014 ' + fase.nome + '\n\n'
+      msg += '\U0001f4ca *Resumo da semana:*\n'
+      msg += '\U0001f4b0 Receitas: ' + fmt(totalRec) + '\n'
+      msg += '\U0001f4b8 Gastos: ' + fmt(totalDesp) + '\n'
+      msg += (saldo>=0 ? '\u2705' : '\U0001f534') + ' Saldo: *' + fmt(saldo) + '*\n\n'
+      if (top3.length > 0) {
+        msg += '\U0001f3c6 *Top 3 gastos:*\n'
+        top3.forEach(([cat,val],i) => { msg += (i+1) + '. ' + (CAT_ICONS[cat]||'\U0001f4b8') + ' ' + cat + ': ' + fmt(val) + '\n' })
+        msg += '\n'
+      }
+      msg += '\U0001f6e1 Reserva: ' + fmt(reservaD.atual) + ' (' + pctRes + '%)\n\n'
+      if (dica && dica.trim()) msg += '\U0001f4a1 *Broto diz:*\n_' + dica.trim() + '_'
       await sendMessage(chatId, msg)
       await sendMessageButtons(chatId, `O que quer fazer hoje?`,[
         [{text:'📈 Ver jardim',callback_data:'menu_jardim'},{text:'💸 Lançar gasto',callback_data:'menu_gasto'}],
