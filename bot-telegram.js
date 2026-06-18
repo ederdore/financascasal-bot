@@ -993,6 +993,102 @@ Regras: NÃO mande parar de gastar. Se reserva < 50%: sugira aporte gentil. Se t
 }
 
 // ── Servidor HTTP ─────────────────────────────────────
+
+// ── Saúde semanal — toda segunda-feira ───────────────
+async function enviarSaudesSemanal() {
+  try {
+    const now = new Date()
+    if (now.getDay() !== 1 || now.getHours() < 8 || now.getHours() > 10) return
+    const { data:usuarios } = await supabase.from('profiles')
+      .select('id,nome,casal_code,telegram_id,objetivo,notif_semanal')
+      .not('telegram_id','is',null)
+    if (!usuarios?.length) return
+    const casaisVistos = new Set()
+    for (const user of usuarios) {
+      if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
+      if (user.notif_semanal === false) continue
+      casaisVistos.add(user.casal_code)
+      const chatId = user.telegram_id
+      const chave = `semanal_${user.casal_code}_${now.toISOString().split('T')[0]}`
+      if (ctxMap.get(chave)) continue
+      ctxMap.set(chave, true)
+      const now7 = new Date(Date.now()-7*24*60*60*1000)
+      const mes = now.getMonth(), ano = now.getFullYear()
+      const [desps,recs,reserva,metas] = await Promise.all([
+        supabase.from('despesas').select('valor,categoria').eq('casal_code',user.casal_code).gte('created_at',now7.toISOString()),
+        supabase.from('receitas').select('valor').eq('casal_code',user.casal_code).eq('mes',mes).eq('ano',ano),
+        supabase.from('reserva').select('atual,meta').eq('user_id',user.id).maybeSingle(),
+        supabase.from('metas').select('nome,valor_alvo,valor_atual,atual').eq('casal_code',user.casal_code).eq('ativa',true).limit(3),
+      ])
+      const totalDesp=(desps.data||[]).reduce((s,d)=>s+d.valor,0)
+      const totalRec=(recs.data||[]).reduce((s,r)=>s+r.valor,0)
+      const saldo=totalRec-totalDesp
+      const reservaD=reserva.data||{atual:0,meta:30000}
+      const pctRes=reservaD.meta>0?Math.round((reservaD.atual/reservaD.meta)*100):0
+      const cats={}
+      ;(desps.data||[]).forEach(d=>{cats[d.categoria]=(cats[d.categoria]||0)+d.valor})
+      const top3=Object.entries(cats).sort((a,b)=>b[1]-a[1]).slice(0,3)
+      let score=30
+      if (totalRec>0) score+=10
+      if (saldo>=0) score+=20
+      if (pctRes>=50) score+=20; else if (pctRes>0) score+=10
+      if ((metas.data||[]).length>0) score+=10
+      score=Math.min(100,score)
+      const fases=[{min:30,max:41,e:'🌱',n:'Broto'},{min:41,max:57,e:'🌿',n:'Crescimento'},{min:57,max:72,e:'🌳',n:'Árvore'},{min:72,max:87,e:'🌳🌳',n:'Jardim'},{min:87,max:101,e:'🌟',n:'Legado'}]
+      const fase=fases.find(f=>score>=f.min&&score<f.max)||fases[4]
+      const prompt=`Consultor financeiro para casais brasileiros. Semana: gastaram ${fmt(totalDesp)}, receitas ${fmt(totalRec)}, saldo ${fmt(saldo)}. Top categorias: ${top3.map(([c,v])=>`${c}: ${fmt(v)}`).join(', ')}. Reserva: ${pctRes}%. Objetivo: ${user.objetivo||'controle'}. Gere UMA mensagem motivadora de no máximo 2 frases sobre o jardim financeiro. Use metáforas de jardim.`
+      const dica=await chamarGroq(prompt)
+      let msg=`${fase.e} *Como está seu jardim esta semana?*
+
+🌡 Saúde: *${score}%* — ${fase.nome}
+
+📊 *Resumo da semana:*
+💰 Receitas: ${fmt(totalRec)}
+💸 Gastos: ${fmt(totalDesp)}
+${saldo>=0?'✅':'🔴'} Saldo: *${fmt(saldo)}*
+
+`
+      if (top3.length>0) { msg+=`🏆 *Top 3 gastos:*
+`; top3.forEach(([cat,val],i)=>{msg+=`${i+1}. ${CAT_ICONS[cat]||'💸'} ${cat}: ${fmt(val)}
+`}); msg+='
+' }
+      msg+=`🛡 Reserva: ${fmt(reservaD.atual)} (${pctRes}%)
+
+`
+      if (dica?.trim()) msg+=`💡 *Broto diz:*
+_${dica.trim()}_`
+      await sendMessage(chatId, msg)
+      await sendMessageButtons(chatId, `O que quer fazer hoje?`,[
+        [{text:'📈 Ver jardim',callback_data:'menu_jardim'},{text:'💸 Lançar gasto',callback_data:'menu_gasto'}],
+        [{text:'🎯 Metas',callback_data:'menu_metas'},{text:'🛡 Reserva',callback_data:'menu_reserva'}],
+      ])
+      await salvarContexto(user.casal_code,'saude_semanal',`Score: ${score}%`,{score,totalDesp,totalRec,saldo,pctRes})
+    }
+  } catch(e) { console.warn('enviarSaudesSemanal:',e.message) }
+}
+
+// ── Reflexão proativa para todos os usuários ─────────
+async function verificarReflexaoGlobal() {
+  try {
+    const now = new Date()
+    const hora = now.getHours()
+    if (hora < 17 || hora > 21) return
+    const { data:usuarios } = await supabase.from('profiles')
+      .select('id,nome,casal_code,telegram_id,objetivo,banco_principal_id')
+      .not('telegram_id','is',null)
+    if (!usuarios?.length) return
+    const casaisVistos = new Set()
+    for (const user of usuarios) {
+      if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
+      casaisVistos.add(user.casal_code)
+      const chatId = user.telegram_id
+      if (!chatId) continue
+      await verificarReflexao(user, chatId)
+      await verificarCategoriaAlta(user, chatId)
+    }
+  } catch(e) { console.warn('verificarReflexaoGlobal:',e.message) }
+}
+
 const server = require('http').createServer((req,res) => {
   if (req.method==='POST'&&req.url==='/webhook') {
     let body=''
