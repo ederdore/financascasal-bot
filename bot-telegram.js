@@ -96,6 +96,11 @@ function fmt(n) {
   return 'R$ ' + Number(n||0).toLocaleString('pt-BR', { minimumFractionDigits:2, maximumFractionDigits:2 })
 }
 
+// Hora atual em BRT (UTC-3)
+function horaBRT() {
+  return (new Date().getUTCHours() - 3 + 24) % 24
+}
+
 const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 const DIAS  = ['domingo','segunda','terça','quarta','quinta','sexta','sábado']
 const CAT_ICONS = { Alimentação:'🛒',Moradia:'🏠',Transporte:'🚗',Saúde:'💊',Lazer:'🎉',Educação:'📚',Assinaturas:'📺',Investimento:'📈',Outros:'💸' }
@@ -564,7 +569,7 @@ async function analisarPadroesUsuario(userId,cc) {
 
 async function verificarReflexao(user,chatId) {
   try {
-    const now=new Date(), hora=now.getHours()
+    const now=new Date(), hora=horaBRT()
     if (hora<17||hora>21) return
     const hoje=now.getDay(), mes=now.getMonth(), ano=now.getFullYear()
     await analisarPadroesUsuario(user.id,user.casal_code)
@@ -998,7 +1003,7 @@ Regras: NÃO mande parar de gastar. Se reserva < 50%: sugira aporte gentil. Se t
 async function enviarSaudesSemanal() {
   try {
     const now = new Date()
-    if (now.getDay() !== 1 || now.getHours() < 8 || now.getHours() > 10) return
+    if (now.getDay() !== 1 || horaBRT() < 8 || horaBRT() > 10) return
     const { data:usuarios } = await supabase.from('profiles')
       .select('id,nome,casal_code,telegram_id,objetivo,notif_semanal')
       .not('telegram_id','is',null)
@@ -1065,7 +1070,7 @@ async function enviarSaudesSemanal() {
 async function verificarReflexaoGlobal() {
   try {
     const now = new Date()
-    const hora = now.getHours()
+    const hora = horaBRT()
     if (hora < 17 || hora > 21) return
     const { data:usuarios } = await supabase.from('profiles')
       .select('id,nome,casal_code,telegram_id,objetivo,banco_principal_id')
@@ -1105,6 +1110,8 @@ const _origProcess = processUpdate
 
 // Verificação noturna + saúde semanal
 setInterval(async () => {
+  const brt = horaBRT()
+  console.log('[CRON] rodando - hora BRT:', brt)
   try { await verificarDiaSemGasto() } catch(e) { console.warn('cron diario:',e.message) }
   try { await verificarReflexaoGlobal() } catch(e) { console.warn('cron reflexao:',e.message) }
   try { await enviarSaudesSemanal() } catch(e) { console.warn('cron semanal:',e.message) }
