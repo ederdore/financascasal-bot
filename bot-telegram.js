@@ -1095,7 +1095,6 @@ async function alertaContasHoje() {
     const now = new Date()
     if (horaBRT() !== 9) return
     const hoje = now.getDate()
-    const mes = now.getMonth(), ano = now.getFullYear()
     const { data:usuarios } = await supabase.from('profiles')
       .select('id,nome,casal_code,telegram_id,notif_semanal')
       .not('telegram_id','is',null)
@@ -1105,7 +1104,7 @@ async function alertaContasHoje() {
       if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
       if (user.notif_semanal === false) continue
       casaisVistos.add(user.casal_code)
-      const chave = `contas_hoje_${user.casal_code}_${now.toISOString().split('T')[0]}`
+      const chave = 'contas_hoje_' + user.casal_code + '_' + now.toISOString().split('T')[0]
       if (ctxMap.get(chave)) continue
       const [contasHoje, cartoes] = await Promise.all([
         supabase.from('contas_fixas').select('*').eq('casal_code',user.casal_code).eq('dia_vencimento',hoje),
@@ -1115,25 +1114,18 @@ async function alertaContasHoje() {
       const cartoesVencemHoje = (cartoes.data||[]).filter(c => c.dia_vencimento === hoje)
       if (!contasVencemHoje.length && !cartoesVencemHoje.length) continue
       ctxMap.set(chave, true)
-      let msg = '⏰ *Vence hoje!*
-
-'
-      contasVencemHoje.forEach(c => { msg += `📋 ${c.nome}: *${fmt(c.valor)}*
-` })
-      cartoesVencemHoje.forEach(c => { msg += `💳 Fatura ${c.nome}: *${fmt(c.fatura)}*
-` })
+      let msg = '\u23f0 *Vence hoje!*\n\n'
+      contasVencemHoje.forEach(c => { msg += '\u{1F4CB} ' + c.nome + ': *' + fmt(c.valor) + '*\n' })
+      cartoesVencemHoje.forEach(c => { msg += '\u{1F4B3} Fatura ' + c.nome + ': *' + fmt(c.fatura) + '*\n' })
       const total = contasVencemHoje.reduce((s,c)=>s+c.valor,0) + cartoesVencemHoje.reduce((s,c)=>s+(c.fatura||0),0)
-      msg += `
-💰 Total de hoje: *${fmt(total)}*`
+      msg += '\n\u{1F4B0} Total de hoje: *' + fmt(total) + '*'
       await sendMessageButtons(user.telegram_id, msg, [
-        [{text:'💳 Ver cartões',callback_data:'menu_fatura'},{text:'📊 Ver resumo',callback_data:'menu_resumo'}],
+        [{text:'Ver fatura',callback_data:'menu_fatura'},{text:'Ver resumo',callback_data:'menu_resumo'}],
       ])
       await salvarContexto(user.casal_code,'alerta_vencimento_hoje',msg,{total,data:hoje})
     }
   } catch(e) { console.warn('alertaContasHoje:',e.message) }
 }
-
-// ── Alertas de contas vencendo na semana (segunda 8h) ─
 async function alertaContasSemana() {
   try {
     const now = new Date()
@@ -1148,7 +1140,7 @@ async function alertaContasSemana() {
       if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
       if (user.notif_semanal === false) continue
       casaisVistos.add(user.casal_code)
-      const chave = `contas_semana_${user.casal_code}_${now.toISOString().split('T')[0]}`
+      const chave = 'contas_semana_' + user.casal_code + '_' + now.toISOString().split('T')[0]
       if (ctxMap.get(chave)) continue
       const [contas, cartoes, bancos] = await Promise.all([
         supabase.from('contas_fixas').select('*').eq('casal_code',user.casal_code),
@@ -1167,20 +1159,13 @@ async function alertaContasSemana() {
       ctxMap.set(chave, true)
       const totalSaldo = (bancos.data||[]).reduce((s,b)=>s+b.saldo,0)
       const totalVence = proximos7.reduce((s,c)=>s+c.valor,0) + cartoesProximos.reduce((s,c)=>s+(c.fatura||0),0)
-      let msg = '📅 *Contas da semana:*
-
-'
-      proximos7.forEach(c => { msg += `• ${c.nome} — *${fmt(c.valor)}* (dia ${c.dia_vencimento})
-` })
-      cartoesProximos.forEach(c => { msg += `• Fatura ${c.nome} — *${fmt(c.fatura)}* (dia ${c.dia_vencimento})
-` })
-      msg += `
-💰 Total a pagar: *${fmt(totalVence)}*
-`
-      msg += `🏦 Saldo disponível: *${fmt(totalSaldo)}*
-`
+      let msg = 'Contas da semana:\n\n'
+      proximos7.forEach(c => { msg += '- ' + c.nome + ' - *' + fmt(c.valor) + '* (dia ' + c.dia_vencimento + ')\n' })
+      cartoesProximos.forEach(c => { msg += '- Fatura ' + c.nome + ' - *' + fmt(c.fatura) + '* (dia ' + c.dia_vencimento + ')\n' })
       const saldoApos = totalSaldo - totalVence
-      msg += `${saldoApos >= 0 ? '✅' : '⚠️'} Saldo após pagamentos: *${fmt(saldoApos)}*`
+      msg += '\nTotal a pagar: *' + fmt(totalVence) + '*\n'
+      msg += 'Saldo disponivel: *' + fmt(totalSaldo) + '*\n'
+      msg += (saldoApos >= 0 ? 'Saldo OK: ' : 'Atencao, saldo insuficiente: ') + '*' + fmt(saldoApos) + '*'
       await sendMessageButtons(user.telegram_id, msg, [
         [{text:'📊 Ver resumo completo',callback_data:'menu_resumo'}],
       ])
@@ -1188,8 +1173,6 @@ async function alertaContasSemana() {
     }
   } catch(e) { console.warn('alertaContasSemana:',e.message) }
 }
-
-// ── Alerta saldo baixo ────────────────────────────────
 async function alertaSaldoBaixo() {
   try {
     const now = new Date()
@@ -1293,17 +1276,13 @@ async function alertaMetaParada() {
       const metasParadas = (metas||[]).filter(m => !metasComAporte.has(m.id))
       if (!metasParadas.length) continue
       ctxMap.set(chave, true)
-      let msg = '🎯 *Metas sem aporte este mês:*
-
-'
+      let msg = 'Metas sem aporte este mes:\n\n'
       metasParadas.forEach(m => {
         const atual = m.valor_atual||m.atual||0
         const pct = m.valor_alvo>0?Math.round((atual/m.valor_alvo)*100):0
-        msg += `• ${m.nome}: ${pct}% (${fmt(atual)} de ${fmt(m.valor_alvo)})
-`
+        msg += '- ' + m.nome + ': ' + pct + '% (' + fmt(atual) + ' de ' + fmt(m.valor_alvo) + ')\n'
       })
-      msg += '
-_Pequenos aportes constantes chegam mais longe do que um grande esforço eventual._ 🌿'
+      msg += '\nPequenos aportes constantes chegam mais longe do que um grande esforco eventual.'
       await sendMessageButtons(user.telegram_id, msg, [
         [{text:'🎯 Ver metas',callback_data:'menu_metas'}],
       ])
@@ -1347,15 +1326,10 @@ async function aprendizadoComportamental() {
         const diasSemGasto = mesmodia.filter(d=>d.valor===0).length
         const prompt = `Casal economizou hoje. Média histórica nas ${DIAS[diaSemana]}s: R$${economia}. Total de dias sem gasto recentes: ${diasSemGasto}. Objetivo: ${user.objetivo||'controle'}. Parabenize em 1-2 frases usando metáforas de jardim. Seja caloroso e específico.`
         const dica = await chamarGroq(prompt)
-        let msg = '🌟 *Parabéns pelo dia de hoje!*
-
-'
-        msg += `Nas últimas semanas, ${DIAS[diaSemana]} costuma ter gastos de *${fmt(economia)}* em média.
-`
-        msg += `Hoje vocês ficaram com o jardim protegido! 🌿
-
-`
-        if (dica?.trim()) msg += `_${dica.trim()}_`
+        let msg = 'Parabens pelo dia de hoje!\n\n'
+        msg += 'Nas ultimas semanas, ' + DIAS[diaSemana] + ' costuma ter gastos de *' + fmt(economia) + '* em media.\n'
+        msg += 'Hoje voces ficaram com o jardim protegido!\n\n'
+        if (dica && dica.trim()) msg += '_' + dica.trim() + '_'
         await sendMessage(user.telegram_id, msg)
         await salvarContexto(user.casal_code,'comportamento_dia_sem_gasto',msg,{totalHoje,mediaHistorica:economia})
       } else if (totalHoje > 0 && mediaHistorica > 0) {
@@ -1364,31 +1338,21 @@ async function aprendizadoComportamental() {
         const diff = totalHoje - mediaHistorica
         const pct = Math.abs(Math.round((diff/mediaHistorica)*100))
         const acimaDaMedia = diff > mediaHistorica * 0.2
-        // Busca % planejado vs impulsivo dos últimos 30 dias
         const { data:comportamentos } = await supabase.from('bot_contextos').select('conteudo')
           .eq('casal_code',user.casal_code).eq('tipo','comportamento')
           .gte('created_at',new Date(Date.now()-30*24*60*60*1000).toISOString())
-        const total = comportamentos?.length || 0
+        const totalComp = comportamentos?.length || 0
         const impulsivas = (comportamentos||[]).filter(c=>c.conteudo==='impulsiva').length
-        const pctImpulsivo = total > 0 ? Math.round((impulsivas/total)*100) : 0
-        const prompt = `Casal gastou ${fmt(totalHoje)} hoje. Média histórica nas ${DIAS[diaSemana]}s: ${fmt(mediaHistorica)}. ${acimaDaMedia?'Acima':'Abaixo'} da média em ${pct}%. ${pctImpulsivo}% das compras recentes foram impulsivas. Objetivo: ${user.objetivo||'controle'}. Dê 1 insight comportamental em 2 frases usando metáforas de jardim. Seja direto e construtivo.`
-        const dica = await chamarGroq(prompt)
-        let msg = `📊 *Resumo do dia:*
-
-`
-        msg += `Hoje: *${fmt(totalHoje)}* ${acimaDaMedia?'📈':'📉'}
-`
-        msg += `Média das ${DIAS[diaSemana]}s: *${fmt(mediaHistorica)}*
-`
-        msg += `${acimaDaMedia ? `+${pct}% acima da média` : `${pct}% abaixo da média ✨`}
-
-`
-        if (pctImpulsivo > 0) msg += `🧠 ${pctImpulsivo}% das compras recentes foram impulsivas
-
-`
-        if (dica?.trim()) msg += `💡 _${dica.trim()}_`
-        await sendMessage(user.telegram_id, msg)
-        await salvarContexto(user.casal_code,'comportamento_fim_dia',msg,{totalHoje,mediaHistorica,pctImpulsivo})
+        const pctImpulsivo = totalComp > 0 ? Math.round((impulsivas/totalComp)*100) : 0
+        const promptComp = 'Casal gastou ' + fmt(totalHoje) + ' hoje. Media historica nas ' + DIAS[diaSemana] + 's: ' + fmt(mediaHistorica) + '. ' + (acimaDaMedia?'Acima':'Abaixo') + ' da media em ' + pct + '%. ' + pctImpulsivo + '% das compras recentes foram impulsivas. De 1 insight comportamental em 2 frases usando metaforas de jardim.'
+        const dicaComp = await chamarGroq(promptComp)
+        let msg2 = 'Resumo do dia:\n\n'
+        msg2 += 'Hoje: *' + fmt(totalHoje) + '* ' + (acimaDaMedia ? '+' + pct + '% acima da media' : pct + '% abaixo da media') + '\n'
+        msg2 += 'Media das ' + DIAS[diaSemana] + 's: *' + fmt(mediaHistorica) + '*\n\n'
+        if (pctImpulsivo > 0) msg2 += pctImpulsivo + '% das compras recentes foram impulsivas\n\n'
+        if (dicaComp && dicaComp.trim()) msg2 += '_' + dicaComp.trim() + '_'
+        await sendMessage(user.telegram_id, msg2)
+        await salvarContexto(user.casal_code,'comportamento_fim_dia',msg2,{totalHoje,mediaHistorica,pctImpulsivo})
       }
     }
   } catch(e) { console.warn('aprendizadoComportamental:',e.message) }
