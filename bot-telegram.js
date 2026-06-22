@@ -858,7 +858,7 @@ _"paguei 120 gasolina"_`)
       await verificarMarco(user,chatId)
       try { await supabase.from('eventos_usuario').insert({user_id:user.id,casal_code:user.casal_code,evento:'primeiro_telegram',dados:{canal:'telegram',tipo:pagTipo}}) } catch {}
       // Pergunta se foi planejado
-      ctxMap.set(`planejado_${fromId}`,{item,pagTipo,expira:Date.now()+10*60*1000})
+      ctxMap.set(`planejado_${chatId}`,{item,pagTipo,expira:Date.now()+10*60*1000})
       await sendMessageButtons(chatId,`Era uma compra planejada?`,[
         [{ text:'✅ Sim, estava no plano', callback_data:'plan_sim' }],
         [{ text:'🙈 Não, foi impulsiva',   callback_data:'plan_nao' }],
@@ -871,9 +871,9 @@ _"paguei 120 gasolina"_`)
   }
 
   // ── Resposta planejado via texto ──
-  const ctxPlan=ctxMap.get(`planejado_${fromId}`)
+  const ctxPlan=ctxMap.get(`planejado_${chatId}`)
   if (ctxPlan&&Date.now()<ctxPlan.expira&&(text.trim()==='1'||text.trim()==='2')) {
-    await processarPlanejado(text.trim()==='1', ctxPlan, user, chatId, fromId)
+    await processarPlanejado(text.trim()==='1', ctxPlan, user, chatId, chatId)
     return
   }
 
@@ -955,8 +955,8 @@ _"paguei 120 gasolina"_`)
 
 // ── Processar resposta planejado/impulsivo ────────────
 async function processarPlanejado(foiPlanejada, ctxPlan, user, chatId, fromId) {
-  ctxMap.delete(`planejado_${fromId}`)
-  ctxMap.delete(`planejado_${chatId}`) // cleanup both keys
+  ctxMap.delete(`planejado_${chatId}`)
+  ctxMap.delete(`planejado_${fromId}`) // cleanup both keys
   const { item, pagTipo } = ctxPlan
   await salvarContexto(user.casal_code,'comportamento',foiPlanejada?'planejada':'impulsiva',{categoria:item.categoria,valor:item.valor,descricao:item.descricao})
   ;(async () => {
@@ -1082,10 +1082,370 @@ async function verificarReflexaoGlobal() {
       casaisVistos.add(user.casal_code)
       const chatId = user.telegram_id
       if (!chatId) continue
-      await verificarReflexao(user, chatId)
+      await verificarReflexaoVariada(user, chatId)
       await verificarCategoriaAlta(user, chatId)
     }
   } catch(e) { console.warn('verificarReflexaoGlobal:',e.message) }
+}
+
+
+// ── Alertas de contas vencendo hoje ──────────────────
+async function alertaContasHoje() {
+  try {
+    const now = new Date()
+    if (horaBRT() !== 9) return
+    const hoje = now.getDate()
+    const mes = now.getMonth(), ano = now.getFullYear()
+    const { data:usuarios } = await supabase.from('profiles')
+      .select('id,nome,casal_code,telegram_id,notif_semanal')
+      .not('telegram_id','is',null)
+    if (!usuarios?.length) return
+    const casaisVistos = new Set()
+    for (const user of usuarios) {
+      if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
+      if (user.notif_semanal === false) continue
+      casaisVistos.add(user.casal_code)
+      const chave = `contas_hoje_${user.casal_code}_${now.toISOString().split('T')[0]}`
+      if (ctxMap.get(chave)) continue
+      const [contasHoje, cartoes] = await Promise.all([
+        supabase.from('contas_fixas').select('*').eq('casal_code',user.casal_code).eq('dia_vencimento',hoje),
+        supabase.from('cartoes').select('*').eq('casal_code',user.casal_code).gt('fatura',0),
+      ])
+      const contasVencemHoje = contasHoje.data || []
+      const cartoesVencemHoje = (cartoes.data||[]).filter(c => c.dia_vencimento === hoje)
+      if (!contasVencemHoje.length && !cartoesVencemHoje.length) continue
+      ctxMap.set(chave, true)
+      let msg = '⏰ *Vence hoje!*
+
+'
+      contasVencemHoje.forEach(c => { msg += `📋 ${c.nome}: *${fmt(c.valor)}*
+` })
+      cartoesVencemHoje.forEach(c => { msg += `💳 Fatura ${c.nome}: *${fmt(c.fatura)}*
+` })
+      const total = contasVencemHoje.reduce((s,c)=>s+c.valor,0) + cartoesVencemHoje.reduce((s,c)=>s+(c.fatura||0),0)
+      msg += `
+💰 Total de hoje: *${fmt(total)}*`
+      await sendMessageButtons(user.telegram_id, msg, [
+        [{text:'💳 Ver cartões',callback_data:'menu_fatura'},{text:'📊 Ver resumo',callback_data:'menu_resumo'}],
+      ])
+      await salvarContexto(user.casal_code,'alerta_vencimento_hoje',msg,{total,data:hoje})
+    }
+  } catch(e) { console.warn('alertaContasHoje:',e.message) }
+}
+
+// ── Alertas de contas vencendo na semana (segunda 8h) ─
+async function alertaContasSemana() {
+  try {
+    const now = new Date()
+    if (now.getDay() !== 1 || horaBRT() !== 8) return
+    const hoje = now.getDate()
+    const { data:usuarios } = await supabase.from('profiles')
+      .select('id,nome,casal_code,telegram_id,notif_semanal')
+      .not('telegram_id','is',null)
+    if (!usuarios?.length) return
+    const casaisVistos = new Set()
+    for (const user of usuarios) {
+      if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
+      if (user.notif_semanal === false) continue
+      casaisVistos.add(user.casal_code)
+      const chave = `contas_semana_${user.casal_code}_${now.toISOString().split('T')[0]}`
+      if (ctxMap.get(chave)) continue
+      const [contas, cartoes, bancos] = await Promise.all([
+        supabase.from('contas_fixas').select('*').eq('casal_code',user.casal_code),
+        supabase.from('cartoes').select('*').eq('casal_code',user.casal_code).gt('fatura',0),
+        supabase.from('contas_banco').select('banco,saldo').eq('casal_code',user.casal_code),
+      ])
+      const proximos7 = (contas.data||[]).filter(c => {
+        const diff = c.dia_vencimento - hoje
+        return diff >= 0 && diff <= 7
+      }).sort((a,b) => a.dia_vencimento - b.dia_vencimento)
+      const cartoesProximos = (cartoes.data||[]).filter(c => {
+        const diff = c.dia_vencimento - hoje
+        return diff >= 0 && diff <= 7
+      })
+      if (!proximos7.length && !cartoesProximos.length) continue
+      ctxMap.set(chave, true)
+      const totalSaldo = (bancos.data||[]).reduce((s,b)=>s+b.saldo,0)
+      const totalVence = proximos7.reduce((s,c)=>s+c.valor,0) + cartoesProximos.reduce((s,c)=>s+(c.fatura||0),0)
+      let msg = '📅 *Contas da semana:*
+
+'
+      proximos7.forEach(c => { msg += `• ${c.nome} — *${fmt(c.valor)}* (dia ${c.dia_vencimento})
+` })
+      cartoesProximos.forEach(c => { msg += `• Fatura ${c.nome} — *${fmt(c.fatura)}* (dia ${c.dia_vencimento})
+` })
+      msg += `
+💰 Total a pagar: *${fmt(totalVence)}*
+`
+      msg += `🏦 Saldo disponível: *${fmt(totalSaldo)}*
+`
+      const saldoApos = totalSaldo - totalVence
+      msg += `${saldoApos >= 0 ? '✅' : '⚠️'} Saldo após pagamentos: *${fmt(saldoApos)}*`
+      await sendMessageButtons(user.telegram_id, msg, [
+        [{text:'📊 Ver resumo completo',callback_data:'menu_resumo'}],
+      ])
+      await salvarContexto(user.casal_code,'alerta_semana',msg,{totalVence,totalSaldo})
+    }
+  } catch(e) { console.warn('alertaContasSemana:',e.message) }
+}
+
+// ── Alerta saldo baixo ────────────────────────────────
+async function alertaSaldoBaixo() {
+  try {
+    const now = new Date()
+    if (horaBRT() !== 21) return
+    const { data:usuarios } = await supabase.from('profiles')
+      .select('id,nome,casal_code,telegram_id,banco_principal_id,saldo_minimo_alerta,notif_dia')
+      .not('telegram_id','is',null)
+    if (!usuarios?.length) return
+    for (const user of usuarios) {
+      if (user.notif_dia === false) continue
+      const chave = `saldo_baixo_${user.casal_code}_${now.toISOString().split('T')[0]}`
+      if (ctxMap.get(chave)) continue
+      const { data:banco } = await supabase.from('contas_banco').select('banco,saldo')
+        .eq('id', user.banco_principal_id).maybeSingle()
+      if (!banco) continue
+      const limite = user.saldo_minimo_alerta || 500
+      if (banco.saldo < limite) {
+        ctxMap.set(chave, true)
+        const msg = `⚠️ *Saldo baixo!*
+
+🏦 ${banco.banco}: *${fmt(banco.saldo)}*
+Abaixo do limite configurado de *${fmt(limite)}*
+
+_Considere transferir para cobrir as próximas contas._`
+        await sendMessage(user.telegram_id, msg)
+        await salvarContexto(user.casal_code,'alerta_saldo_baixo',msg,{saldo:banco.saldo,limite})
+      }
+    }
+  } catch(e) { console.warn('alertaSaldoBaixo:',e.message) }
+}
+
+// ── Alerta churn — sem lançamentos há 3+ dias ─────────
+async function alertaChurn() {
+  try {
+    const now = new Date()
+    if (horaBRT() !== 21) return
+    const { data:usuarios } = await supabase.from('profiles')
+      .select('id,nome,casal_code,telegram_id,notif_dia')
+      .not('telegram_id','is',null)
+    if (!usuarios?.length) return
+    const casaisVistos = new Set()
+    for (const user of usuarios) {
+      if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
+      if (user.notif_dia === false) continue
+      casaisVistos.add(user.casal_code)
+      const chave = `churn_${user.casal_code}_${now.toISOString().split('T')[0]}`
+      if (ctxMap.get(chave)) continue
+      const { data:ultimos } = await supabase.from('despesas').select('created_at')
+        .eq('casal_code',user.casal_code)
+        .order('created_at',{ascending:false}).limit(1)
+      if (!ultimos?.length) continue
+      const ultimoLanc = new Date(ultimos[0].created_at)
+      const diasSem = Math.floor((now - ultimoLanc) / (24*60*60*1000))
+      if (diasSem >= 3) {
+        ctxMap.set(chave, true)
+        const msg = `🌱 *${user.nome}, seu jardim está esperando!*
+
+Faz *${diasSem} dias* sem novos lançamentos.
+
+Manter o registro ativo ajuda o Broto a aprender e dar dicas mais precisas.
+
+_Pequenos registros constroem grandes jardins._ 🌿`
+        await sendMessageButtons(user.telegram_id, msg, [
+          [{text:'💸 Lançar agora',callback_data:'menu_gasto'},{text:'📊 Ver resumo',callback_data:'menu_resumo'}],
+        ])
+        await salvarContexto(user.casal_code,'alerta_churn',msg,{diasSem})
+        // Registra no banco para admin monitorar
+        try {
+          await supabase.from('eventos_usuario').insert({
+            user_id:user.id, casal_code:user.casal_code,
+            evento:'risco_churn', dados:{diasSem, ultimoLanc:ultimoLanc.toISOString()},
+          })
+        } catch {}
+      }
+    }
+  } catch(e) { console.warn('alertaChurn:',e.message) }
+}
+
+// ── Alerta meta parada — dia 15 ───────────────────────
+async function alertaMetaParada() {
+  try {
+    const now = new Date()
+    if (now.getDate() !== 15 || horaBRT() !== 9) return
+    const { data:usuarios } = await supabase.from('profiles')
+      .select('id,nome,casal_code,telegram_id,notif_semanal')
+      .not('telegram_id','is',null)
+    if (!usuarios?.length) return
+    const casaisVistos = new Set()
+    for (const user of usuarios) {
+      if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
+      if (user.notif_semanal === false) continue
+      casaisVistos.add(user.casal_code)
+      const chave = `meta_parada_${user.casal_code}_${now.getMonth()}_${now.getFullYear()}`
+      if (ctxMap.get(chave)) continue
+      const trintaDias = new Date(Date.now()-30*24*60*60*1000)
+      const { data:aportes } = await supabase.from('aportes_metas').select('meta_id')
+        .eq('casal_code',user.casal_code).gte('created_at',trintaDias.toISOString())
+      const metasComAporte = new Set((aportes||[]).map(a=>a.meta_id))
+      const { data:metas } = await supabase.from('metas').select('id,nome,valor_alvo,valor_atual,atual')
+        .eq('casal_code',user.casal_code).eq('ativa',true)
+      const metasParadas = (metas||[]).filter(m => !metasComAporte.has(m.id))
+      if (!metasParadas.length) continue
+      ctxMap.set(chave, true)
+      let msg = '🎯 *Metas sem aporte este mês:*
+
+'
+      metasParadas.forEach(m => {
+        const atual = m.valor_atual||m.atual||0
+        const pct = m.valor_alvo>0?Math.round((atual/m.valor_alvo)*100):0
+        msg += `• ${m.nome}: ${pct}% (${fmt(atual)} de ${fmt(m.valor_alvo)})
+`
+      })
+      msg += '
+_Pequenos aportes constantes chegam mais longe do que um grande esforço eventual._ 🌿'
+      await sendMessageButtons(user.telegram_id, msg, [
+        [{text:'🎯 Ver metas',callback_data:'menu_metas'}],
+      ])
+      await salvarContexto(user.casal_code,'alerta_meta_parada',msg,{qtd:metasParadas.length})
+    }
+  } catch(e) { console.warn('alertaMetaParada:',e.message) }
+}
+
+// ── Aprendizado comportamental ────────────────────────
+async function aprendizadoComportamental() {
+  try {
+    const now = new Date()
+    if (horaBRT() !== 22) return
+    const { data:usuarios } = await supabase.from('profiles')
+      .select('id,nome,casal_code,telegram_id,notif_dia,objetivo')
+      .not('telegram_id','is',null)
+    if (!usuarios?.length) return
+    const casaisVistos = new Set()
+    for (const user of usuarios) {
+      if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
+      if (user.notif_dia === false) continue
+      casaisVistos.add(user.casal_code)
+      const chave = `comportamento_${user.casal_code}_${now.toISOString().split('T')[0]}`
+      if (ctxMap.get(chave)) continue
+      const inicioDia = new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString()
+      const { data:gastosHoje } = await supabase.from('despesas').select('valor,categoria,nome')
+        .eq('casal_code',user.casal_code).gte('created_at',inicioDia)
+      const totalHoje = (gastosHoje||[]).reduce((s,d)=>s+d.valor,0)
+      // Busca histórico do mesmo dia da semana nos últimos 90 dias
+      const diaSemana = now.getDay()
+      const noventaDias = new Date(Date.now()-90*24*60*60*1000)
+      const { data:historico } = await supabase.from('despesas').select('valor,created_at')
+        .eq('casal_code',user.casal_code).gte('created_at',noventaDias.toISOString())
+      // Filtra pelo mesmo dia da semana
+      const mesmodia = (historico||[]).filter(d => new Date(d.created_at).getDay() === diaSemana)
+      const mediaHistorica = mesmodia.length > 0 ? mesmodia.reduce((s,d)=>s+d.valor,0)/mesmodia.length : 0
+      if (totalHoje === 0 && mediaHistorica > 0) {
+        // Dia sem gasto — parabeniza com contexto histórico
+        ctxMap.set(chave, true)
+        const economia = Math.round(mediaHistorica)
+        const diasSemGasto = mesmodia.filter(d=>d.valor===0).length
+        const prompt = `Casal economizou hoje. Média histórica nas ${DIAS[diaSemana]}s: R$${economia}. Total de dias sem gasto recentes: ${diasSemGasto}. Objetivo: ${user.objetivo||'controle'}. Parabenize em 1-2 frases usando metáforas de jardim. Seja caloroso e específico.`
+        const dica = await chamarGroq(prompt)
+        let msg = '🌟 *Parabéns pelo dia de hoje!*
+
+'
+        msg += `Nas últimas semanas, ${DIAS[diaSemana]} costuma ter gastos de *${fmt(economia)}* em média.
+`
+        msg += `Hoje vocês ficaram com o jardim protegido! 🌿
+
+`
+        if (dica?.trim()) msg += `_${dica.trim()}_`
+        await sendMessage(user.telegram_id, msg)
+        await salvarContexto(user.casal_code,'comportamento_dia_sem_gasto',msg,{totalHoje,mediaHistorica:economia})
+      } else if (totalHoje > 0 && mediaHistorica > 0) {
+        // Teve gastos — compara com histórico
+        ctxMap.set(chave, true)
+        const diff = totalHoje - mediaHistorica
+        const pct = Math.abs(Math.round((diff/mediaHistorica)*100))
+        const acimaDaMedia = diff > mediaHistorica * 0.2
+        // Busca % planejado vs impulsivo dos últimos 30 dias
+        const { data:comportamentos } = await supabase.from('bot_contextos').select('conteudo')
+          .eq('casal_code',user.casal_code).eq('tipo','comportamento')
+          .gte('created_at',new Date(Date.now()-30*24*60*60*1000).toISOString())
+        const total = comportamentos?.length || 0
+        const impulsivas = (comportamentos||[]).filter(c=>c.conteudo==='impulsiva').length
+        const pctImpulsivo = total > 0 ? Math.round((impulsivas/total)*100) : 0
+        const prompt = `Casal gastou ${fmt(totalHoje)} hoje. Média histórica nas ${DIAS[diaSemana]}s: ${fmt(mediaHistorica)}. ${acimaDaMedia?'Acima':'Abaixo'} da média em ${pct}%. ${pctImpulsivo}% das compras recentes foram impulsivas. Objetivo: ${user.objetivo||'controle'}. Dê 1 insight comportamental em 2 frases usando metáforas de jardim. Seja direto e construtivo.`
+        const dica = await chamarGroq(prompt)
+        let msg = `📊 *Resumo do dia:*
+
+`
+        msg += `Hoje: *${fmt(totalHoje)}* ${acimaDaMedia?'📈':'📉'}
+`
+        msg += `Média das ${DIAS[diaSemana]}s: *${fmt(mediaHistorica)}*
+`
+        msg += `${acimaDaMedia ? `+${pct}% acima da média` : `${pct}% abaixo da média ✨`}
+
+`
+        if (pctImpulsivo > 0) msg += `🧠 ${pctImpulsivo}% das compras recentes foram impulsivas
+
+`
+        if (dica?.trim()) msg += `💡 _${dica.trim()}_`
+        await sendMessage(user.telegram_id, msg)
+        await salvarContexto(user.casal_code,'comportamento_fim_dia',msg,{totalHoje,mediaHistorica,pctImpulsivo})
+      }
+    }
+  } catch(e) { console.warn('aprendizadoComportamental:',e.message) }
+}
+
+// ── Reflexão com variação (evita repetição) ───────────
+async function verificarReflexaoVariada(user, chatId) {
+  try {
+    const now = new Date()
+    const hora = horaBRT()
+    if (hora < 17 || hora > 21) return
+    const hoje = now.getDay(), mes = now.getMonth(), ano = now.getFullYear()
+    await analisarPadroesUsuario(user.id, user.casal_code)
+    const { data:padroes } = await supabase.from('padroes_gasto').select('*')
+      .eq('casal_code',user.casal_code).eq('dia_semana',hoje).eq('ativo',true)
+      .gte('ocorrencias',2).order('valor_medio',{ascending:false}).limit(3)
+    if (!padroes?.length) return
+    // Seleciona padrão diferente do último enviado
+    const { data:ultimaReflexao } = await supabase.from('bot_contextos').select('dados')
+      .eq('casal_code',user.casal_code).eq('tipo','reflexao_variada')
+      .order('created_at',{ascending:false}).limit(1).maybeSingle()
+    const ultimoPadraoId = ultimaReflexao?.dados?.padraoId
+    const padrao = padroes.find(p => p.id !== ultimoPadraoId) || padroes[0]
+    const chave = `reflexao_var_${user.id}_${padrao.id}_${now.toISOString().split('T')[0]}`
+    if (ctxMap.get(chave)) return
+    ctxMap.set(chave, true)
+    const { data:jaRespondeu } = await supabase.from('reflexoes_respondidas').select('id')
+      .eq('casal_code',user.casal_code).eq('padrao_id',padrao.id).eq('mes',mes).eq('ano',ano).maybeSingle()
+    if (jaRespondeu) return
+    const { data:aportes } = await supabase.from('aportes_metas').select('valor')
+      .eq('casal_code',user.casal_code).eq('mes',mes).eq('ano',ano)
+    const totalAportes = (aportes||[]).reduce((s,a)=>s+a.valor,0)
+    const jaInvestiu = totalAportes >= padrao.valor_medio
+    const dia = DIAS[hoje], valor = fmt(padrao.valor_medio), projecao = fmt(padrao.valor_medio*12)
+    const icon = CAT_ICONS[padrao.categoria]||'💸'
+    // Varia a mensagem com IA
+    const prompt = `Reflexão financeira para casal brasileiro. Hoje é ${dia}. Padrão identificado: gastam ${valor} em ${padrao.categoria} nas ${dia}s. Projeção anual: ${projecao}. ${jaInvestiu?'Já investiram este mês — parabenize e encoraje.':'Ainda não investiram este mês — faça uma reflexão gentil de 2 frases sobre consciência financeira sem ser moralista. Use metáfora de jardim diferente das anteriores.'}`
+    const reflexao = await chamarGroq(prompt)
+    let msg = `🌿 *Reflexão do Éden*
+
+${icon} ${reflexao||`Nas ${dia}s vocês costumam gastar *${valor}* em ${padrao.categoria}.`}
+
+`
+    if (!jaInvestiu) {
+      msg += `💡 _Repetindo 12x ao ano = ${projecao}_
+
+Responda:
+✅ *sim* — já guardei
+💰 *guardar* — vou guardar agora
+🙈 *não* — não desta vez`
+      ctxMap.set(`aguardando_reflexao_${user.id}`,{padraoId:padrao.id,mes,ano,expira:Date.now()+4*60*60*1000})
+    } else {
+      msg += `✅ Vocês já investiram *${fmt(totalAportes)}* este mês. Aproveitem com consciência! 🌿`
+    }
+    await sendMessage(chatId, msg)
+    await salvarContexto(user.casal_code,'reflexao_variada',msg,{padraoId:padrao.id,categoria:padrao.categoria})
+  } catch(e) { console.warn('verificarReflexaoVariada:',e.message) }
 }
 
 const server = require('http').createServer((req,res) => {
@@ -1115,6 +1475,12 @@ setInterval(async () => {
   try { await verificarDiaSemGasto() } catch(e) { console.warn('cron diario:',e.message) }
   try { await verificarReflexaoGlobal() } catch(e) { console.warn('cron reflexao:',e.message) }
   try { await enviarSaudesSemanal() } catch(e) { console.warn('cron semanal:',e.message) }
+  try { await alertaContasHoje() } catch(e) { console.warn('cron contas hoje:',e.message) }
+  try { await alertaContasSemana() } catch(e) { console.warn('cron contas semana:',e.message) }
+  try { await alertaSaldoBaixo() } catch(e) { console.warn('cron saldo baixo:',e.message) }
+  try { await alertaChurn() } catch(e) { console.warn('cron churn:',e.message) }
+  try { await alertaMetaParada() } catch(e) { console.warn('cron meta parada:',e.message) }
+  try { await aprendizadoComportamental() } catch(e) { console.warn('cron comportamento:',e.message) }
 }, 60*60*1000) // a cada 1 hora
 
 server.listen(PORT, async () => {
