@@ -639,9 +639,9 @@ async function verificarDiaSemGasto() {
       if (!user.casal_code||casaisVistos.has(user.casal_code)) continue
       casaisVistos.add(user.casal_code)
       const chatId=user.telegram_id; if (!chatId) continue
-      const chaveHoje=`dia_sem_gasto_${user.casal_code}_${now.toISOString().split('T')[0]}`
-      if (ctxMap.get(chaveHoje)) continue
-      const mes=now.getMonth(), ano=now.getFullYear()
+      // Verifica no banco se já enviou hoje
+      const { data:jaEnviouHoje } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).eq('tipo','nudge_dia').gte('created_at',new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString()).maybeSingle()
+      if (jaEnviouHoje) continue
       const { data:gastosHoje } = await supabase.from('despesas').select('valor').eq('casal_code',user.casal_code).eq('mes',mes).eq('ano',ano).gte('created_at',new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString())
       const totalHoje=(gastosHoje||[]).reduce((s,d)=>s+d.valor,0)
       const { data:gastosUltimos30 } = await supabase.from('despesas').select('valor').eq('casal_code',user.casal_code).gte('created_at',new Date(Date.now()-30*24*60*60*1000).toISOString())
@@ -669,7 +669,7 @@ async function verificarDiaSemGasto() {
         msg=`✨ *Dia econômico!*\n\nGastaram ${fmt(totalHoje)} hoje — ${Math.round((totalHoje/mediaDiaria)*100)}% da média diária.\nUma diferença de ${fmt(economia)} em relação ao dia típico. 🌿`
       }
       if (msg) {
-        ctxMap.set(chaveHoje,true)
+      // (persistido via bot_contextos)
         await sendMessage(chatId,msg)
         await salvarContexto(user.casal_code,'nudge_dia',msg,{totalHoje,mediaDiaria:Math.round(mediaDiaria),diasSemGasto})
       }
@@ -1014,8 +1014,8 @@ async function enviarSaudesSemanal() {
       if (user.notif_semanal === false) continue
       casaisVistos.add(user.casal_code)
       const chatId = user.telegram_id
-      const chave = `semanal_${user.casal_code}_${now.toISOString().split('T')[0]}`
-      if (ctxMap.get(chave)) continue
+      const { data:jaEnviouSemanal } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).eq('tipo','saude_semanal').gte('created_at',new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString()).maybeSingle()
+      if (jaEnviouSemanal) continue
       ctxMap.set(chave, true)
       const now7 = new Date(Date.now()-7*24*60*60*1000)
       const mes = now.getMonth(), ano = now.getFullYear()
@@ -1104,8 +1104,11 @@ async function alertaContasHoje() {
       if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
       if (user.notif_semanal === false) continue
       casaisVistos.add(user.casal_code)
-      const chave = 'contas_hoje_' + user.casal_code + '_' + now.toISOString().split('T')[0]
-      if (ctxMap.get(chave)) continue
+      const { data:jaEnviouContas } = await supabase.from('bot_contextos')
+        .select('id').eq('casal_code', user.casal_code).eq('tipo', 'alerta_vencimento_hoje')
+        .gte('created_at', new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString())
+        .maybeSingle()
+      if (jaEnviouContas) continue
       const [contasHoje, cartoes] = await Promise.all([
         supabase.from('contas_fixas').select('*').eq('casal_code',user.casal_code).eq('dia_vencimento',hoje),
         supabase.from('cartoes').select('*').eq('casal_code',user.casal_code).gt('fatura',0),
@@ -1183,8 +1186,8 @@ async function alertaSaldoBaixo() {
     if (!usuarios?.length) return
     for (const user of usuarios) {
       if (user.notif_dia === false) continue
-      const chave = `saldo_baixo_${user.casal_code}_${now.toISOString().split('T')[0]}`
-      if (ctxMap.get(chave)) continue
+      const { data:jaEnviouSaldo } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).eq('tipo','alerta_saldo_baixo').gte('created_at',new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString()).maybeSingle()
+      if (jaEnviouSaldo) continue
       const { data:banco } = await supabase.from('contas_banco').select('banco,saldo')
         .eq('id', user.banco_principal_id).maybeSingle()
       if (!banco) continue
@@ -1218,8 +1221,8 @@ async function alertaChurn() {
       if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
       if (user.notif_dia === false) continue
       casaisVistos.add(user.casal_code)
-      const chave = `churn_${user.casal_code}_${now.toISOString().split('T')[0]}`
-      if (ctxMap.get(chave)) continue
+      const { data:jaEnviouChurn } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).eq('tipo','alerta_churn').gte('created_at',new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString()).maybeSingle()
+      if (jaEnviouChurn) continue
       const { data:ultimos } = await supabase.from('despesas').select('created_at')
         .eq('casal_code',user.casal_code)
         .order('created_at',{ascending:false}).limit(1)
@@ -1305,8 +1308,8 @@ async function aprendizadoComportamental() {
       if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
       if (user.notif_dia === false) continue
       casaisVistos.add(user.casal_code)
-      const chave = `comportamento_${user.casal_code}_${now.toISOString().split('T')[0]}`
-      if (ctxMap.get(chave)) continue
+      const { data:jaEnviouComp } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).in('tipo',['comportamento_dia_sem_gasto','comportamento_fim_dia']).gte('created_at',new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString()).maybeSingle()
+      if (jaEnviouComp) continue
       const inicioDia = new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString()
       const { data:gastosHoje } = await supabase.from('despesas').select('valor,categoria,nome')
         .eq('casal_code',user.casal_code).gte('created_at',inicioDia)
