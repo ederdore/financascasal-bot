@@ -342,19 +342,48 @@ async function handleMenuCallback(callbackData, user, chatId) {
   }
 
   if (callbackData === 'menu_metas') {
-    const { data:metas } = await supabase.from('metas').select('nome,valor_alvo,valor_atual,atual').eq('casal_code',user.casal_code).eq('ativa',true).limit(5)
-    if (!metas?.length) {
-      await sendMessageButtons(chatId, '🎯 Nenhuma meta ativa.', [[{ text:'🔙 Menu', callback_data:'menu_inicio' }]])
+    const [metasRes, reservaRes] = await Promise.all([
+      supabase.from('metas').select('nome,valor_alvo,valor_atual,atual').eq('casal_code',user.casal_code).eq('ativa',true),
+      supabase.from('reserva').select('atual,meta').eq('user_id',user.id).maybeSingle(),
+    ])
+    const metas = metasRes.data || []
+    const reserva = reservaRes.data || { atual:0, meta:30000 }
+    const pctRes = reserva.meta > 0 ? Math.round((reserva.atual/reserva.meta)*100) : 0
+    let msg = ''
+    if (pctRes < 100) {
+      const bRes = '█'.repeat(Math.floor(pctRes/10)) + '░'.repeat(10-Math.floor(pctRes/10))
+      msg += '🛡 *FUNDAÇÃO — Prioridade máxima*\n'
+      msg += bRes + ' ' + pctRes + '%\n'
+      msg += fmt(reserva.atual) + ' de ' + fmt(reserva.meta) + ' (falta ' + fmt(reserva.meta - reserva.atual) + ')\n'
+      msg += '_Proteja o jardim antes de plantar novas sementes._\n\n'
+      msg += '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n'
+    } else {
+      msg += '🌳 *Fundação sólida! Jardim protegido.*\n_Agora foco total nas metas!_\n\n'
+      msg += '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n'
+    }
+    if (!metas.length) {
+      msg += '🎯 Nenhuma meta cadastrada ainda.'
+      await sendMessageButtons(chatId, msg, [[{ text:'🔙 Menu', callback_data:'menu_inicio' }]])
       return
     }
-    let msg = `🎯 *Suas metas:*\n\n`
-    metas.forEach(m => {
+    const metasComPct = metas.map(m => {
       const atual = m.valor_atual||m.atual||0
       const pct = m.valor_alvo>0?Math.round((atual/m.valor_alvo)*100):0
-      const falta = m.valor_alvo-atual
-      const barra = '█'.repeat(Math.floor(pct/10))+'░'.repeat(10-Math.floor(pct/10))
-      msg += `*${m.nome}*\n${barra} ${pct}%\n${fmt(atual)} de ${fmt(m.valor_alvo)} (falta ${fmt(falta)})\n\n`
-    })
+      return { ...m, atual, pct, falta: m.valor_alvo - atual }
+    }).sort((a,b) => b.pct - a.pct)
+    const proxima = metasComPct[0]
+    const bProx = '█'.repeat(Math.floor(proxima.pct/10)) + '░'.repeat(10-Math.floor(proxima.pct/10))
+    msg += '🎯 *PRÓXIMA META*\n'
+    msg += '*' + proxima.nome + '*\n'
+    msg += bProx + ' ' + proxima.pct + '%\n'
+    msg += fmt(proxima.atual) + ' de ' + fmt(proxima.valor_alvo) + ' · falta ' + fmt(proxima.falta) + '\n'
+    if (metasComPct.length > 1) {
+      msg += '\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n'
+      msg += '📋 *OUTRAS METAS*\n'
+      metasComPct.slice(1).forEach(m => {
+        msg += '\u2022 ' + m.nome + ' — ' + m.pct + '% (' + fmt(m.atual) + ' de ' + fmt(m.valor_alvo) + ')\n'
+      })
+    }
     await sendMessageButtons(chatId, msg, [[{ text:'🔙 Menu', callback_data:'menu_inicio' }]])
     return
   }
@@ -365,11 +394,22 @@ async function handleMenuCallback(callbackData, user, chatId) {
     const pct = r.meta>0?Math.round((r.atual/r.meta)*100):0
     const falta = r.meta-r.atual
     const barra = '█'.repeat(Math.floor(pct/10))+'░'.repeat(10-Math.floor(pct/10))
-    const msg = `🛡 *Reserva de Emergência*\n\n${barra} ${pct}%\n\n💰 Atual: *${fmt(r.atual)}*\n🎯 Meta: *${fmt(r.meta)}*\n📉 Falta: *${fmt(falta)}*\n\n${pct>=100?'✅ Reserva completa! Jardim protegido.':pct>=50?'🌿 Mais da metade — continue!':'🌱 Em construção — cada aporte conta.'}`
-    await sendMessageButtons(chatId, msg, [[{ text:'🔙 Menu', callback_data:'menu_inicio' }]])
+    let msg = ''
+    if (pct >= 100) {
+      msg = '🌳 *Reserva completa! Jardim protegido.*\n\n' + barra + ' 100%\n'
+      msg += '💰 ' + fmt(r.atual) + ' guardados\n\n_Base sólida — agora foco nas metas!_'
+    } else {
+      msg = '🛡 *Reserva de Emergência*\n\n' + barra + ' ' + pct + '%\n\n'
+      msg += '💰 Atual: *' + fmt(r.atual) + '*\n'
+      msg += '🎯 Meta: *' + fmt(r.meta) + '*\n'
+      msg += '📉 Falta: *' + fmt(falta) + '*\n\n'
+      if (pct < 20) msg += '_Prioridade máxima — essa é a fundação do jardim._'
+      else if (pct < 50) msg += '🌱 _Crescendo! Continue aportando regularmente._'
+      else msg += '🌿 _Mais da metade — o jardim está ficando sólido!_'
+    }
+    await sendMessageButtons(chatId, msg, [[{ text:'💰 Ver metas', callback_data:'menu_metas' },{ text:'🔙 Menu', callback_data:'menu_inicio' }]])
     return
   }
-
   if (callbackData === 'menu_jardim') {
     const { totalRec, totalDesp, saldo, reserva, bancos } = await getResumo(user)
     const pctRes = reserva.meta>0?Math.round((reserva.atual/reserva.meta)*100):0
@@ -986,6 +1026,18 @@ Regras: NÃO mande parar de gastar. Se reserva < 50%: sugira aporte gentil. Se t
       }
     } catch(e) { console.warn('dica planejado:',e.message) }
   })()
+  // Encerramento — bot volta ao zero
+  setTimeout(async () => {
+    try {
+      await sendMessageButtons(chatId,
+        '\u2705 Tudo registrado! O jardim est\u00e1 atualizado.\n\n_Pode me dizer o pr\u00f3ximo gasto:_',
+        [
+          [{ text:'Novo gasto', callback_data:'menu_gasto' },{ text:'Resumo', callback_data:'menu_resumo' }],
+          [{ text:'Ver jardim', callback_data:'menu_jardim' },{ text:'Menu', callback_data:'menu_inicio' }],
+        ]
+      )
+    } catch(e) { console.warn('encerramento:', e.message) }
+  }, 2500)
 }
 
 // ── Servidor HTTP ─────────────────────────────────────
