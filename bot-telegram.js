@@ -478,7 +478,7 @@ Dê UMA insight financeiro personalizado e motivador em 2-3 frases. Use metáfor
     try { await supabase.from('eventos_usuario').insert({user_id:user.id,casal_code:user.casal_code,evento:'primeiro_telegram',dados:{canal:'telegram',tipo:pagTipo}}) } catch {}
     // Pergunta planejado
     // Find the fromId from the original message — use chatId as fallback for DM chats
-    ctxMap.set(`planejado_${chatId}`, { item, pagTipo, expira: Date.now()+10*60*1000 })
+    ctxMap.set('planejado_' + user.id, { item, pagTipo, expira: Date.now()+10*60*1000 })
     await sendMessageButtons(chatId, `Era uma compra planejada?`, [
       [{ text:'✅ Sim, estava no plano', callback_data:'plan_sim' }],
       [{ text:'🙈 Não, foi impulsiva',   callback_data:'plan_nao' }],
@@ -489,21 +489,13 @@ Dê UMA insight financeiro personalizado e motivador em 2-3 frases. Use metáfor
   // ── Callbacks de planejado ──
   if (callbackData === 'plan_sim' || callbackData === 'plan_nao') {
     const foiPlanejada = callbackData === 'plan_sim'
-    // Look for context by chatId (DM = chatId equals userId)
-    const ctxKey = `planejado_${chatId}`
+    const ctxKey = 'planejado_' + user.id
     const foundCtx = ctxMap.get(ctxKey)
     if (foundCtx && Date.now() < foundCtx.expira) {
       ctxMap.delete(ctxKey)
-      await processarPlanejado(foiPlanejada, foundCtx, user, chatId, chatId)
+      await processarPlanejado(foiPlanejada, foundCtx, user, chatId, user.id)
     } else {
-      // Fallback — search all pending
-      for (const [k,v] of ctxMap.entries()) {
-        if (k.startsWith('planejado_') && v.item && Date.now() < v.expira) {
-          ctxMap.delete(k)
-          await processarPlanejado(foiPlanejada, v, user, chatId, chatId)
-          break
-        }
-      }
+      await sendMessage(chatId, '⏱ Tempo expirado. Lance novamente e responda em até 10 minutos.')
     }
     return
   }
@@ -858,7 +850,7 @@ _"paguei 120 gasolina"_`)
       await verificarMarco(user,chatId)
       try { await supabase.from('eventos_usuario').insert({user_id:user.id,casal_code:user.casal_code,evento:'primeiro_telegram',dados:{canal:'telegram',tipo:pagTipo}}) } catch {}
       // Pergunta se foi planejado
-      ctxMap.set(`planejado_${chatId}`,{item,pagTipo,expira:Date.now()+10*60*1000})
+      ctxMap.set('planejado_' + user.id,{item,pagTipo,expira:Date.now()+10*60*1000})
       await sendMessageButtons(chatId,`Era uma compra planejada?`,[
         [{ text:'✅ Sim, estava no plano', callback_data:'plan_sim' }],
         [{ text:'🙈 Não, foi impulsiva',   callback_data:'plan_nao' }],
@@ -871,7 +863,7 @@ _"paguei 120 gasolina"_`)
   }
 
   // ── Resposta planejado via texto ──
-  const ctxPlan=ctxMap.get(`planejado_${chatId}`)
+  const ctxPlan=ctxMap.get('planejado_' + user.id)
   if (ctxPlan&&Date.now()<ctxPlan.expira&&(text.trim()==='1'||text.trim()==='2')) {
     await processarPlanejado(text.trim()==='1', ctxPlan, user, chatId, chatId)
     return
@@ -955,8 +947,7 @@ _"paguei 120 gasolina"_`)
 
 // ── Processar resposta planejado/impulsivo ────────────
 async function processarPlanejado(foiPlanejada, ctxPlan, user, chatId, fromId) {
-  ctxMap.delete(`planejado_${chatId}`)
-  ctxMap.delete(`planejado_${fromId}`) // cleanup both keys
+  ctxMap.delete('planejado_' + (fromId || chatId))
   const { item, pagTipo } = ctxPlan
   await salvarContexto(user.casal_code,'comportamento',foiPlanejada?'planejada':'impulsiva',{categoria:item.categoria,valor:item.valor,descricao:item.descricao})
   ;(async () => {
