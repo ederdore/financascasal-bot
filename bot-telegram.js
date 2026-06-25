@@ -126,6 +126,29 @@ async function chamarGroq(prompt) {
   } catch(e) { console.error('[Groq fetch error]', e.message); return '' }
 }
 
+// ── Claude API ───────────────────────────────────────
+async function chamarClaude(prompt, systemPrompt = '') {
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 500,
+        system: systemPrompt || 'Você é o Broto, consultor financeiro do Éden — app de finanças para casais brasileiros. Seja direto, caloroso e use metáforas de jardim. Responda em português.',
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    })
+    const data = await res.json()
+    if (!res.ok) { console.error('[Claude error]', JSON.stringify(data)); return '' }
+    return data?.content?.[0]?.text || ''
+  } catch(e) { console.error('[Claude fetch error]', e.message); return '' }
+}
+
 async function interpretarMensagem(texto) {
   const prompt = `Analise: "${texto.substring(0,200)}"
 Responda APENAS JSON válido:
@@ -320,12 +343,45 @@ async function handleMenuCallback(callbackData, user, chatId) {
   }
 
   if (callbackData === 'menu_resumo') {
-    const { totalRec, totalDesp, saldo } = await getResumo(user)
+    await sendAction(chatId, 'typing')
+    const { totalRec, totalDesp, saldo, bancos, reserva } = await getResumo(user)
     const m = now.getMonth()
-    const msg = `📊 *Resumo de ${MESES[m]}*\n\n💰 Receitas: *${fmt(totalRec)}*\n💸 Gastos: *${fmt(totalDesp)}*\n${saldo>=0?'✅':'🔴'} Saldo: *${fmt(saldo)}*`
-    await sendMessageButtons(chatId, msg, [[{ text:'🔙 Menu', callback_data:'menu_inicio' }]])
+    const taxaPoupanca = totalRec > 0 ? Math.round(((totalRec-totalDesp)/totalRec)*100) : 0
+    const pctRes = reserva.meta > 0 ? Math.round((reserva.atual/reserva.meta)*100) : 0
+    const saldoBancos = bancos.reduce((s,b)=>s+b.saldo,0)
+    const { data:metas } = await supabase.from('metas').select('nome,valor_alvo,valor_atual,atual').eq('casal_code',user.casal_code).eq('ativa',true).limit(3)
+    let msg = '\U0001f4ca *Resumo de ' + MESES[m] + '*\n\n'
+    msg += '\U0001f4b0 Receitas: *' + fmt(totalRec) + '*\n'
+    msg += '\U0001f4b8 Gastos: *' + fmt(totalDesp) + '*\n'
+    msg += (saldo>=0?'\u2705':'\U0001f534') + ' Saldo: *' + fmt(saldo) + '*\n\n'
+    msg += '\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n'
+    msg += '\U0001f4c8 *Intelig\u00eancia financeira:*\n\n'
+    const emojP = taxaPoupanca>=20?'\U0001f31f':taxaPoupanca>=10?'\U0001f33f':taxaPoupanca>=0?'\U0001f331':'\U0001f534'
+    msg += emojP + ' Taxa de poupan\u00e7a: *' + taxaPoupanca + '%*'
+    if (taxaPoupanca>=20) msg += ' \u2014 excelente!\n'
+    else if (taxaPoupanca>=10) msg += ' \u2014 bom caminho!\n'
+    else if (taxaPoupanca>=0) msg += ' \u2014 pode melhorar\n'
+    else msg += ' \u2014 m\u00eas no vermelho\n'
+    const emojR = pctRes>=100?'\U0001f6e1':pctRes>=50?'\U0001f33f':pctRes>0?'\U0001f331':'\u26a0\ufe0f'
+    msg += emojR + ' Reserva de emerg\u00eancia: *' + pctRes + '%*'
+    if (pctRes>=100) msg += ' \u2014 jardim protegido!\n'
+    else if (pctRes>=50) msg += ' \u2014 mais da metade!\n'
+    else if (pctRes>0) msg += ' \u2014 continue crescendo\n'
+    else msg += ' \u2014 prioridade m\u00e1xima!\n'
+    msg += '\U0001f3e6 Patrim\u00f4nio l\u00edquido: *' + fmt(saldoBancos + reserva.atual) + '*'
+    await sendMessage(chatId, msg)
+    // Dica do Claude
+    const ctxMetas = (metas||[]).map(mt => { const at=mt.valor_atual||mt.atual||0; const pc=mt.valor_alvo>0?Math.round((at/mt.valor_alvo)*100):0; return mt.nome+': '+pc+'% ('+fmt(at)+' de '+fmt(mt.valor_alvo)+')' }).join(', ')
+    const promptClaude = 'Casal brasileiro, dados do mes:\nReceitas: '+fmt(totalRec)+'\nGastos: '+fmt(totalDesp)+'\nSaldo: '+fmt(saldo)+'\nTaxa de poupanca: '+taxaPoupanca+'%\nReserva emergencia: '+pctRes+'% de '+fmt(reserva.meta)+'\nMetas: '+(ctxMetas||'nenhuma')+'\nObjetivo: '+(user.objetivo||'controle')+'\n\nAnalise a situacao e de 2-3 dicas educativas e motivadoras para esta semana. Priorize reserva se < 100%. Use metaforas de jardim. Maximo 4 frases.'
+    const dicaClaude = await chamarClaude(promptClaude)
+    if (dicaClaude?.trim()) await sendMessage(chatId, '\U0001f331 *Broto analisa:*\n\n' + dicaClaude.trim())
+    await sendMessageButtons(chatId, 'O que deseja fazer?', [
+      [{ text:'\U0001f3af Ver metas', callback_data:'menu_metas' },{ text:'\U0001f6e1 Reserva', callback_data:'menu_reserva' }],
+      [{ text:'\U0001f519 Menu', callback_data:'menu_inicio' }],
+    ])
     return
   }
+
 
   if (callbackData === 'menu_fatura') {
     const { data:cartoes } = await supabase.from('cartoes').select('nome,fatura').eq('casal_code',user.casal_code)
