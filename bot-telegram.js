@@ -1016,7 +1016,11 @@ Reserva de emergência: ${pctReserva}% completa${pctReserva<50?' (abaixo do idea
 Metas ativas: ${ctxMetas||'nenhuma cadastrada'}
 Objetivo do casal: ${user.objetivo||'controle'}
 ${dicasAnteriores?'Dicas recentes (NÃO repita): '+dicasAnteriores:''}
-Regras: NÃO mande parar de gastar. Se reserva < 50%: sugira aporte gentil. Se tem metas: mencione quanto falta. Máx 2 frases. Só a dica.`
+Regras:
+- NÃO mande parar de gastar
+- Se reserva < 100%: foque APENAS na reserva — ela é a prioridade máxima, não mencione metas
+- Se reserva = 100%: mencione apenas a meta mais próxima de concluir
+- Máx 2 frases curtas e diretas. Só a dica, sem titulo.`
       if (!jaEnviou||!foiPlanejada) {
         const dica=await chamarGroq(prompt)
         if (dica?.trim()) {
