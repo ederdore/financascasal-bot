@@ -367,34 +367,34 @@ async function handleMenuCallback(callbackData, user, chatId) {
     const pctRes = reserva.meta > 0 ? Math.round((reserva.atual/reserva.meta)*100) : 0
     const saldoBancos = bancos.reduce((s,b)=>s+b.saldo,0)
     const { data:metas } = await supabase.from('metas').select('nome,valor_alvo,valor_atual,atual').eq('casal_code',user.casal_code).eq('ativa',true).limit(3)
-    let msg = '\U0001f4ca *Resumo de ' + MESES[m] + '*\n\n'
-    msg += '\U0001f4b0 Receitas: *' + fmt(totalRec) + '*\n'
-    msg += '\U0001f4b8 Gastos: *' + fmt(totalDesp) + '*\n'
-    msg += (saldo>=0?'\u2705':'\U0001f534') + ' Saldo: *' + fmt(saldo) + '*\n\n'
-    msg += '\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n'
-    msg += '\U0001f4c8 *Intelig\u00eancia financeira:*\n\n'
-    const emojP = taxaPoupanca>=20?'\U0001f31f':taxaPoupanca>=10?'\U0001f33f':taxaPoupanca>=0?'\U0001f331':'\U0001f534'
+    let msg = '📊 *Resumo de ' + MESES[m] + '*\n\n'
+    msg += '💰 Receitas: *' + fmt(totalRec) + '*\n'
+    msg += '💸 Gastos: *' + fmt(totalDesp) + '*\n'
+    msg += (saldo>=0?'✅':'🔴') + ' Saldo: *' + fmt(saldo) + '*\n\n'
+    msg += '━━━━━━━━━━━━━━━━\n'
+    msg += '📈 *Intelig\u00eancia financeira:*\n\n'
+    const emojP = taxaPoupanca>=20?'🌟':taxaPoupanca>=10?'🌿':taxaPoupanca>=0?'🌱':'🔴'
     msg += emojP + ' Taxa de poupan\u00e7a: *' + taxaPoupanca + '%*'
     if (taxaPoupanca>=20) msg += ' \u2014 excelente!\n'
     else if (taxaPoupanca>=10) msg += ' \u2014 bom caminho!\n'
     else if (taxaPoupanca>=0) msg += ' \u2014 pode melhorar\n'
     else msg += ' \u2014 m\u00eas no vermelho\n'
-    const emojR = pctRes>=100?'\U0001f6e1':pctRes>=50?'\U0001f33f':pctRes>0?'\U0001f331':'\u26a0\ufe0f'
+    const emojR = pctRes>=100?'🛡':pctRes>=50?'🌿':pctRes>0?'🌱':'⚠️'
     msg += emojR + ' Reserva de emerg\u00eancia: *' + pctRes + '%*'
     if (pctRes>=100) msg += ' \u2014 jardim protegido!\n'
     else if (pctRes>=50) msg += ' \u2014 mais da metade!\n'
     else if (pctRes>0) msg += ' \u2014 continue crescendo\n'
     else msg += ' \u2014 prioridade m\u00e1xima!\n'
-    msg += '\U0001f3e6 Patrim\u00f4nio l\u00edquido: *' + fmt(saldoBancos + reserva.atual) + '*'
+    msg += '🏦 Patrim\u00f4nio l\u00edquido: *' + fmt(saldoBancos + reserva.atual) + '*'
     await sendMessage(chatId, msg)
     // Dica do Claude
     const ctxMetas = (metas||[]).map(mt => { const at=mt.valor_atual||mt.atual||0; const pc=mt.valor_alvo>0?Math.round((at/mt.valor_alvo)*100):0; return mt.nome+': '+pc+'% ('+fmt(at)+' de '+fmt(mt.valor_alvo)+')' }).join(', ')
     const promptClaude = 'Casal brasileiro, dados do mes:\nReceitas: '+fmt(totalRec)+'\nGastos: '+fmt(totalDesp)+'\nSaldo: '+fmt(saldo)+'\nTaxa de poupanca: '+taxaPoupanca+'%\nReserva emergencia: '+pctRes+'% de '+fmt(reserva.meta)+'\nMetas: '+(ctxMetas||'nenhuma')+'\nObjetivo: '+(user.objetivo||'controle')+'\n\nAnalise a situacao e de 2-3 dicas educativas e motivadoras para esta semana. Priorize reserva se < 100%. Use metaforas de jardim. Maximo 4 frases.'
     const dicaClaude = await chamarClaude(promptClaude)
-    if (dicaClaude?.trim()) await sendMessage(chatId, '\U0001f331 *Broto analisa:*\n\n' + dicaClaude.trim())
+    if (dicaClaude?.trim()) await sendMessage(chatId, '🌱 *Broto analisa:*\n\n' + dicaClaude.trim())
     await sendMessageButtons(chatId, 'O que deseja fazer?', [
-      [{ text:'\U0001f3af Ver metas', callback_data:'menu_metas' },{ text:'\U0001f6e1 Reserva', callback_data:'menu_reserva' }],
-      [{ text:'\U0001f519 Menu', callback_data:'menu_inicio' }],
+      [{ text:'🎯 Ver metas', callback_data:'menu_metas' },{ text:'🛡 Reserva', callback_data:'menu_reserva' }],
+      [{ text:'🔙 Menu', callback_data:'menu_inicio' }],
     ])
     return
   }
@@ -429,10 +429,10 @@ async function handleMenuCallback(callbackData, user, chatId) {
       msg += bRes + ' ' + pctRes + '%\n'
       msg += fmt(reserva.atual) + ' de ' + fmt(reserva.meta) + ' (falta ' + fmt(reserva.meta - reserva.atual) + ')\n'
       msg += '_Proteja o jardim antes de plantar novas sementes._\n\n'
-      msg += '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n'
+      msg += '────────────────\n'
     } else {
       msg += '🌳 *Fundação sólida! Jardim protegido.*\n_Agora foco total nas metas!_\n\n'
-      msg += '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n'
+      msg += '────────────────\n'
     }
     if (!metas.length) {
       msg += '🎯 Nenhuma meta cadastrada ainda.'
@@ -451,7 +451,7 @@ async function handleMenuCallback(callbackData, user, chatId) {
     msg += bProx + ' ' + proxima.pct + '%\n'
     msg += fmt(proxima.atual) + ' de ' + fmt(proxima.valor_alvo) + ' · falta ' + fmt(proxima.falta) + '\n'
     if (metasComPct.length > 1) {
-      msg += '\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n'
+      msg += '\n────────────────\n'
       msg += '📋 *OUTRAS METAS*\n'
       metasComPct.slice(1).forEach(m => {
         msg += '\u2022 ' + m.nome + ' — ' + m.pct + '% (' + fmt(m.atual) + ' de ' + fmt(m.valor_alvo) + ')\n'
@@ -555,7 +555,7 @@ Dê UMA insight financeiro personalizado e motivador em 2-3 frases. Use metáfor
       await sendMessage(chatId, '📝 Me diga qual categoria querem focar esta semana:')
     } else {
       await salvarContexto(user.casal_code, 'ancora_foco', cat, { cat, semana: new Date().toISOString().split('T')[0] })
-      await sendMessage(chatId, '\U0001f3af Foco definido: *' + cat + '*\n\nNa proxima segunda vou reportar como foi. 🌿')
+      await sendMessage(chatId, '🎯 Foco definido: *' + cat + '*\n\nNa proxima segunda vou reportar como foi. 🌿')
     }
     return
   }
@@ -1119,7 +1119,7 @@ Regras:
   setTimeout(async () => {
     try {
       await sendMessageButtons(chatId,
-        '\u2705 Tudo registrado! O jardim est\u00e1 atualizado.\n\n_Pode me dizer o pr\u00f3ximo gasto:_',
+        '✅ Tudo registrado! O jardim est\u00e1 atualizado.\n\n_Pode me dizer o pr\u00f3ximo gasto:_',
         [
           [{ text:'Novo gasto', callback_data:'menu_gasto' },{ text:'Resumo', callback_data:'menu_resumo' }],
           [{ text:'Ver jardim', callback_data:'menu_jardim' },{ text:'Menu', callback_data:'menu_inicio' }],
@@ -1177,16 +1177,16 @@ async function enviarSaudesSemanal() {
       const dica=await chamarGroq(prompt)
       let msg = fase.e + ' *Como está seu jardim esta semana?*\n\n'
       msg += '\U0001f321 Saúde: *' + score + '%* \u2014 ' + fase.nome + '\n\n'
-      msg += '\U0001f4ca *Resumo da semana:*\n'
-      msg += '\U0001f4b0 Receitas: ' + fmt(totalRec) + '\n'
-      msg += '\U0001f4b8 Gastos: ' + fmt(totalDesp) + '\n'
-      msg += (saldo>=0 ? '\u2705' : '\U0001f534') + ' Saldo: *' + fmt(saldo) + '*\n\n'
+      msg += '📊 *Resumo da semana:*\n'
+      msg += '💰 Receitas: ' + fmt(totalRec) + '\n'
+      msg += '💸 Gastos: ' + fmt(totalDesp) + '\n'
+      msg += (saldo>=0 ? '✅' : '🔴') + ' Saldo: *' + fmt(saldo) + '*\n\n'
       if (top3.length > 0) {
         msg += '\U0001f3c6 *Top 3 gastos:*\n'
-        top3.forEach(([cat,val],i) => { msg += (i+1) + '. ' + (CAT_ICONS[cat]||'\U0001f4b8') + ' ' + cat + ': ' + fmt(val) + '\n' })
+        top3.forEach(([cat,val],i) => { msg += (i+1) + '. ' + (CAT_ICONS[cat]||'💸') + ' ' + cat + ': ' + fmt(val) + '\n' })
         msg += '\n'
       }
-      msg += '\U0001f6e1 Reserva: ' + fmt(reservaD.atual) + ' (' + pctRes + '%)\n\n'
+      msg += '🛡 Reserva: ' + fmt(reservaD.atual) + ' (' + pctRes + '%)\n\n'
       if (dica && dica.trim()) msg += '\U0001f4a1 *Broto diz:*\n_' + dica.trim() + '_'
       await sendMessage(chatId, msg)
       await sendMessageButtons(chatId, `O que quer fazer hoje?`,[
@@ -1249,7 +1249,7 @@ async function alertaContasHoje() {
       const cartoesVencemHoje = (cartoes.data||[]).filter(c => c.dia_vencimento === hoje)
       if (!contasVencemHoje.length && !cartoesVencemHoje.length) continue
       ctxMap.set(chave, true)
-      let msg = '\u23f0 *Vence hoje!*\n\n'
+      let msg = '⏰ *Vence hoje!*\n\n'
       contasVencemHoje.forEach(c => { msg += '\u{1F4CB} ' + c.nome + ': *' + fmt(c.valor) + '*\n' })
       cartoesVencemHoje.forEach(c => { msg += '\u{1F4B3} Fatura ' + c.nome + ': *' + fmt(c.fatura) + '*\n' })
       const total = contasVencemHoje.reduce((s,c)=>s+c.valor,0) + cartoesVencemHoje.reduce((s,c)=>s+(c.fatura||0),0)
@@ -1809,6 +1809,195 @@ async function ancoraSemanaldal() {
   } catch(e) { console.warn('ancoraSemanaldal:', e.message) }
 }
 
+
+// ── Celebrações — vida vivida com consciência ─────────
+async function verificarCelebracoes() {
+  try {
+    const now = new Date()
+    if (horaBRT() !== 20) return
+    const mes = now.getMonth(), ano = now.getFullYear()
+    const { data:usuarios } = await supabase.from('profiles')
+      .select('id,nome,casal_code,telegram_id,notif_dia')
+      .not('telegram_id','is',null)
+    if (!usuarios?.length) return
+    const casaisVistos = new Set()
+
+    for (const user of usuarios) {
+      if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
+      if (user.notif_dia === false) continue
+      casaisVistos.add(user.casal_code)
+
+      // Busca parceiro do casal para personalizar
+      const { data:parceiro } = await supabase.from('profiles')
+        .select('nome').eq('casal_code', user.casal_code)
+        .neq('id', user.id).maybeSingle()
+      const nomeParceiro = parceiro?.nome?.split(' ')[0] || ''
+      const nomesDupla = nomeParceiro ? user.nome.split(' ')[0] + ' & ' + nomeParceiro : user.nome.split(' ')[0]
+
+      // Busca dados do mês
+      const semanaAtras = new Date(Date.now() - 7*24*60*60*1000).toISOString()
+      const [despsHoje, despsSemana, despsAntSemana, reserva] = await Promise.all([
+        supabase.from('despesas').select('valor,categoria,tipo_compra').eq('casal_code',user.casal_code)
+          .gte('created_at', new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString()),
+        supabase.from('despesas').select('valor,categoria').eq('casal_code',user.casal_code)
+          .gte('created_at', semanaAtras),
+        supabase.from('despesas').select('valor,categoria').eq('casal_code',user.casal_code)
+          .gte('created_at', new Date(Date.now()-14*24*60*60*1000).toISOString())
+          .lte('created_at', semanaAtras),
+        supabase.from('reserva').select('atual,meta').eq('user_id',user.id).maybeSingle(),
+      ])
+
+      const celebracoes = []
+
+      // 1. Reduziu categoria esta semana vs semana passada
+      const catsSemana = {}
+      const catsAnt = {}
+      ;(despsSemana.data||[]).forEach(d => { catsSemana[d.categoria]=(catsSemana[d.categoria]||0)+d.valor })
+      ;(despsAntSemana.data||[]).forEach(d => { catsAnt[d.categoria]=(catsAnt[d.categoria]||0)+d.valor })
+
+      for (const [cat, val] of Object.entries(catsSemana)) {
+        const valAnt = catsAnt[cat] || 0
+        const reducao = valAnt - val
+        const pct = valAnt > 0 ? Math.round((reducao/valAnt)*100) : 0
+        if (reducao >= 50 && pct >= 20) {
+          const chaveRed = 'celebracao_reducao_' + cat + '_' + user.casal_code + '_' + now.toISOString().split('T')[0]
+          const { data:jaRed } = await supabase.from('bot_contextos').select('id')
+            .eq('casal_code',user.casal_code).eq('tipo','celebracao_reducao_'+cat)
+            .gte('created_at', new Date(now.getFullYear(),now.getMonth(),now.getDate()-7).toISOString())
+            .maybeSingle()
+          if (!jaRed) {
+            // Usa Claude para sugerir celebração personalizada
+            const promptCelebr = 'Casal brasileiro chamado ' + nomesDupla + ' reduziu gastos em ' + cat + ' em ' + pct + '% esta semana (economizaram ' + fmt(reducao) + '). Sugira uma celebração romântica e acessível para eles aproveitarem parte dessa economia juntos. Máximo 2 frases, caloroso, use a metáfora do jardim. Não mencione valores.'
+            const dicaCelebr = await chamarClaude(promptCelebr)
+            celebracoes.push({
+              tipo: 'celebracao_reducao_' + cat,
+              msg: '🎉 *' + nomesDupla + ', vocês reduziram ' + cat + ' em ' + pct + '%!*
+
+Economizaram *' + fmt(reducao) + '* essa semana.
+
+' + (dicaCelebr || 'Que tal celebrar com um programa especial juntos? Vocês merecem! 🌹'),
+            })
+          }
+        }
+      }
+
+      // 2. Semana sem compras impulsivas
+      const impulsivas = (despsSemana.data||[]).filter(d=>d.tipo_compra==='impulsiva')
+      if (impulsivas.length === 0 && (despsSemana.data||[]).length >= 3) {
+        const { data:jaImp } = await supabase.from('bot_contextos').select('id')
+          .eq('casal_code',user.casal_code).eq('tipo','celebracao_sem_impulsiva')
+          .gte('created_at', new Date(now.getFullYear(),now.getMonth(),now.getDate()-7).toISOString())
+          .maybeSingle()
+        if (!jaImp) {
+          celebracoes.push({
+            tipo: 'celebracao_sem_impulsiva',
+            msg: '🌟 *Uma semana de decisões conscientes!*
+
+' + nomesDupla + ', toda compra desta semana foi planejada.
+
+Isso é raro e merece ser celebrado. 🌿
+
+_Escolham um programa juntos esse fim de semana — vocês construíram algo bonito._',
+          })
+        }
+      }
+
+      // 3. Marcos da reserva com celebração
+      const r = reserva.data || { atual:0, meta:30000 }
+      const pctRes = r.meta > 0 ? Math.round((r.atual/r.meta)*100) : 0
+      for (const marco of [25, 50, 75, 100]) {
+        if (pctRes >= marco) {
+          const { data:jaMarco } = await supabase.from('bot_contextos').select('id')
+            .eq('casal_code',user.casal_code).eq('tipo','celebracao_reserva_'+marco).maybeSingle()
+          if (!jaMarco) {
+            const msgs = {
+              25:  '🛡 *25% da reserva! O jardim tem raízes agora.*
+
+' + nomesDupla + ', o primeiro escudo está plantado.
+
+_Comemorem com algo simples e especial — um jantar em casa com velas conta muito. 🕯️_',
+              50:  '🛡 *Metade da reserva! O jardim está ficando sólido.*
+
+' + nomesDupla + ', isso é uma conquista real.
+
+_Que tal aquele restaurante que vocês estavam querendo ir? Vocês merecem celebrar ao vivo. 🍷_',
+              75:  '🛡 *75% da reserva! Quase lá.*
+
+O jardim de ' + nomesDupla + ' está protegido.
+
+_Planejem uma experiência juntos — uma saída, um passeio. Celebrar o caminho é tão importante quanto chegar. 🌹_',
+              100: '🌳 *Reserva completa! Jardim totalmente protegido.*
+
+' + nomesDupla + ', isso é liberdade.
+
+Vocês construíram a fundação que a maioria dos casais nunca tem.
+
+_Celebrem de verdade — um jantar especial, uma viagem curta. Vocês viveram com consciência para chegar aqui. 🥂_',
+            }
+            celebracoes.push({ tipo: 'celebracao_reserva_'+marco, msg: msgs[marco] })
+          }
+        }
+      }
+
+      // Envia celebrações
+      for (const c of celebracoes) {
+        await sendMessage(user.telegram_id, c.msg)
+        await salvarContexto(user.casal_code, c.tipo, c.msg, { mes, ano })
+        await new Promise(r => setTimeout(r, 1500))
+      }
+    }
+  } catch(e) { console.warn('verificarCelebracoes:', e.message) }
+}
+
+// ── Mensagem de fim de semana ─────────────────────────
+async function mensagemFimDeSemana() {
+  try {
+    const now = new Date()
+    if (now.getDay() !== 5 || horaBRT() !== 19) return
+
+    const { data:usuarios } = await supabase.from('profiles')
+      .select('id,nome,casal_code,telegram_id,notif_dia')
+      .not('telegram_id','is',null)
+    if (!usuarios?.length) return
+    const casaisVistos = new Set()
+
+    for (const user of usuarios) {
+      if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
+      if (user.notif_dia === false) continue
+      casaisVistos.add(user.casal_code)
+
+      const { data:jaEnviou } = await supabase.from('bot_contextos').select('id')
+        .eq('casal_code',user.casal_code).eq('tipo','fim_de_semana')
+        .gte('created_at', new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString())
+        .maybeSingle()
+      if (jaEnviou) continue
+
+      const { data:parceiro } = await supabase.from('profiles')
+        .select('nome').eq('casal_code',user.casal_code).neq('id',user.id).maybeSingle()
+      const nomeParceiro = parceiro?.nome?.split(' ')[0] || ''
+      const nomesDupla = nomeParceiro ? user.nome.split(' ')[0] + ' & ' + nomeParceiro : user.nome.split(' ')[0]
+
+      // Saldo da semana
+      const { data:desps } = await supabase.from('despesas').select('valor')
+        .eq('casal_code',user.casal_code)
+        .gte('created_at', new Date(Date.now()-7*24*60*60*1000).toISOString())
+      const totalSemana = (desps||[]).reduce((s,d)=>s+d.valor,0)
+
+      const prompt = 'Casal brasileiro chamado ' + nomesDupla + ' gastou ' + fmt(totalSemana) + ' essa semana. É sexta-feira. Sugira algo especial e acessível para eles aproveitarem o fim de semana juntos — pode ser um programa em casa, ao ar livre ou um programa simples. Seja caloroso, celebre que eles terminaram mais uma semana. Use metáfora do jardim. Máximo 3 frases.'
+      const dica = await chamarClaude(prompt)
+
+      const msg = '🌅 *Boa sexta-feira, ' + nomesDupla + '!*
+
+A semana passou e o jardim continua crescendo.
+
+' + (dica || 'Aproveitem o fim de semana juntos — o jardim que vocês cultivam merece ser celebrado ao vivo. 🌹')
+
+      await sendMessage(user.telegram_id, msg)
+      await salvarContexto(user.casal_code, 'fim_de_semana', msg, { totalSemana })
+    }
+  } catch(e) { console.warn('mensagemFimDeSemana:', e.message) }
+}
+
 const server = require('http').createServer((req,res) => {
   if (req.method==='POST'&&req.url==='/webhook') {
     let body=''
@@ -1846,6 +2035,8 @@ setInterval(async () => {
   try { await projecaoMes() } catch(e) { console.warn('cron projecao:',e.message) }
   try { await celebrarConquistas() } catch(e) { console.warn('cron conquistas:',e.message) }
   try { await ancoraSemanaldal() } catch(e) { console.warn('cron ancora:',e.message) }
+  try { await verificarCelebracoes() } catch(e) { console.warn('cron celebracoes:',e.message) }
+  try { await mensagemFimDeSemana() } catch(e) { console.warn('cron fimdesemana:',e.message) }
 }, 60*60*1000) // a cada 1 hora
 
 server.listen(PORT, async () => {
