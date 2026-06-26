@@ -531,6 +531,18 @@ Dê UMA insight financeiro personalizado e motivador em 2-3 frases. Use metáfor
     return
   }
 
+  // Âncora semanal — categoria escolhida
+  if (callbackData.startsWith('ancora_cat_')) {
+    const cat = callbackData.replace('ancora_cat_', '')
+    if (cat === 'outro') {
+      await sendMessage(chatId, '📝 Me diga qual categoria querem focar esta semana:')
+    } else {
+      await salvarContexto(user.casal_code, 'ancora_foco', cat, { cat, semana: new Date().toISOString().split('T')[0] })
+      await sendMessage(chatId, '\U0001f3af Foco definido: *' + cat + '*\n\nNa proxima segunda vou reportar como foi. 🌿')
+    }
+    return
+  }
+
   if (callbackData === 'menu_inicio') {
     await sendMessageButtons(chatId, `🌿 *Éden — o que deseja fazer?*`, menuPrincipal())
     return
@@ -1518,6 +1530,268 @@ Responda:
   } catch(e) { console.warn('verificarReflexaoVariada:',e.message) }
 }
 
+
+// ── 1. Fechamento mensal enriquecido (dia 1) ─────────
+async function fechamentoMensal() {
+  try {
+    const now = new Date()
+    if (now.getDate() !== 1 || horaBRT() !== 8) return
+    const mes = now.getMonth() === 0 ? 11 : now.getMonth() - 1
+    const ano = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()
+
+    const { data: usuarios } = await supabase.from('profiles')
+      .select('id,nome,casal_code,telegram_id,notif_semanal,objetivo')
+      .not('telegram_id','is',null)
+    if (!usuarios?.length) return
+    const casaisVistos = new Set()
+
+    for (const user of usuarios) {
+      if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
+      if (user.notif_semanal === false) continue
+      casaisVistos.add(user.casal_code)
+      const chave = 'fechamento_' + user.casal_code + '_' + mes + '_' + ano
+      const { data: jaEnviou } = await supabase.from('bot_contextos').select('id')
+        .eq('casal_code', user.casal_code).eq('tipo', 'fechamento_mensal')
+        .gte('created_at', new Date(now.getFullYear(), now.getMonth(), 1).toISOString())
+        .maybeSingle()
+      if (jaEnviou) continue
+
+      const [desps, recs, despMesAnt, recMesAnt] = await Promise.all([
+        supabase.from('despesas').select('valor,categoria,quem').eq('casal_code',user.casal_code).eq('mes',mes).eq('ano',ano),
+        supabase.from('receitas').select('valor,quem').eq('casal_code',user.casal_code).eq('mes',mes).eq('ano',ano),
+        supabase.from('despesas').select('valor,categoria').eq('casal_code',user.casal_code).eq('mes',mes===0?11:mes-1).eq('ano',mes===0?ano-1:ano),
+        supabase.from('receitas').select('valor').eq('casal_code',user.casal_code).eq('mes',mes===0?11:mes-1).eq('ano',mes===0?ano-1:ano),
+      ])
+
+      const totalDesp = (desps.data||[]).reduce((s,d)=>s+d.valor,0)
+      const totalRec = (recs.data||[]).reduce((s,r)=>s+r.valor,0)
+      const totalDespAnt = (despMesAnt.data||[]).reduce((s,d)=>s+d.valor,0)
+      const totalRecAnt = (recMesAnt.data||[]).reduce((s,r)=>s+r.valor,0)
+      const saldo = totalRec - totalDesp
+      const poupanca = totalRec > 0 ? Math.round(((totalRec-totalDesp)/totalRec)*100) : 0
+
+      // Divisão EU vs ELA
+      const despEu  = (desps.data||[]).filter(d=>d.quem==='eu').reduce((s,d)=>s+d.valor,0)
+      const despEla = (desps.data||[]).filter(d=>d.quem==='ela').reduce((s,d)=>s+d.valor,0)
+      const recEu   = (recs.data||[]).filter(r=>r.quem==='eu').reduce((s,r)=>s+r.valor,0)
+      const recEla  = (recs.data||[]).filter(r=>r.quem==='ela').reduce((s,r)=>s+r.valor,0)
+
+      // Top categoria
+      const cats = {}
+      ;(desps.data||[]).forEach(d => { cats[d.categoria]=(cats[d.categoria]||0)+d.valor })
+      const topCat = Object.entries(cats).sort((a,b)=>b[1]-a[1])[0]
+
+      // Comparativo mês anterior
+      const diffDesp = totalDesp - totalDespAnt
+      const tendencia = diffDesp > 0 ? '+' + fmt(diffDesp) + ' vs mês anterior' : fmt(Math.abs(diffDesp)) + ' a menos que mês anterior'
+
+      const emoji = saldo >= 0 ? '✅' : '🔴'
+      let msg = '🌿 *Fechamento de ' + MESES[mes] + '*\n\n'
+      msg += emoji + ' Saldo: *' + fmt(saldo) + '*\n'
+      msg += '💰 Receitas: ' + fmt(totalRec) + '\n'
+      msg += '💸 Gastos: ' + fmt(totalDesp) + ' (' + tendencia + ')\n'
+      msg += '📈 Poupanca: *' + poupanca + '%*\n\n'
+      if (topCat) msg += '🏆 Maior gasto: ' + topCat[0] + ' (' + fmt(topCat[1]) + ')\n\n'
+      if (despEu > 0 || despEla > 0) {
+        msg += '👫 *Divisao do casal:*\n'
+        msg += '- EU: ' + fmt(despEu) + ' gastos / ' + fmt(recEu) + ' receitas\n'
+        msg += '- ELA: ' + fmt(despEla) + ' gastos / ' + fmt(recEla) + ' receitas\n\n'
+      }
+      msg += saldo >= 0 ? 'Jardim fechou no azul! Continue assim.' : 'Jardim fechou no vermelho. Vamos replanejar.'
+      await sendMessage(user.telegram_id, msg)
+      await salvarContexto(user.casal_code, 'fechamento_mensal', msg, { mes, ano, saldo, poupanca })
+    }
+  } catch(e) { console.warn('fechamentoMensal:', e.message) }
+}
+
+// ── 2. Projeção do mês ────────────────────────────────
+async function projecaoMes() {
+  try {
+    const now = new Date()
+    const dia = now.getDate()
+    const hora = horaBRT()
+    // Roda nos dias 15 e 20 às 9h
+    if ((dia !== 15 && dia !== 20) || hora !== 9) return
+
+    const { data: usuarios } = await supabase.from('profiles')
+      .select('id,nome,casal_code,telegram_id,notif_semanal')
+      .not('telegram_id','is',null)
+    if (!usuarios?.length) return
+    const casaisVistos = new Set()
+
+    for (const user of usuarios) {
+      if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
+      if (user.notif_semanal === false) continue
+      casaisVistos.add(user.casal_code)
+
+      const chave = 'projecao_' + user.casal_code + '_' + now.toISOString().split('T')[0]
+      const { data: jaEnviou } = await supabase.from('bot_contextos').select('id')
+        .eq('casal_code', user.casal_code).eq('tipo', 'projecao_mes')
+        .gte('created_at', new Date(now.getFullYear(), now.getMonth(), dia).toISOString())
+        .maybeSingle()
+      if (jaEnviou) continue
+
+      const mes = now.getMonth(), ano = now.getFullYear()
+      const diasNoMes = new Date(ano, mes+1, 0).getDate()
+      const diasRestantes = diasNoMes - dia
+
+      const [desps, recs] = await Promise.all([
+        supabase.from('despesas').select('valor').eq('casal_code',user.casal_code).eq('mes',mes).eq('ano',ano),
+        supabase.from('receitas').select('valor').eq('casal_code',user.casal_code).eq('mes',mes).eq('ano',ano),
+      ])
+
+      const totalDesp = (desps.data||[]).reduce((s,d)=>s+d.valor,0)
+      const totalRec  = (recs.data||[]).reduce((s,r)=>s+r.valor,0)
+      const mediaDiaria = totalDesp / dia
+      const projecaoFim = totalDesp + (mediaDiaria * diasRestantes)
+      const projecaoSaldo = totalRec - projecaoFim
+      const pctUsado = totalRec > 0 ? Math.round((totalDesp/totalRec)*100) : 0
+
+      if (pctUsado < 60) continue // só avisa se já usou mais de 60% da renda
+
+      const emoji = projecaoSaldo >= 0 ? '🟡' : '🔴'
+      const emojiP = projecaoSaldo >= 0 ? '🟡' : '🔴'
+      let msg = emojiP + ' *Projecao do mes*\n\n'
+      msg += 'Dia ' + dia + ' de ' + diasNoMes + ' - ' + diasRestantes + ' dias restantes\n\n'
+      msg += '💸 Gastos ate agora: *' + fmt(totalDesp) + '* (' + pctUsado + '% da renda)\n'
+      msg += '📊 Ritmo diario: ' + fmt(mediaDiaria) + '/dia\n'
+      msg += '🔮 Projecao fim do mes: *' + fmt(projecaoFim) + '*\n\n'
+      if (projecaoSaldo < 0) {
+        msg += '⚠️ No ritmo atual, deficit de *' + fmt(Math.abs(projecaoSaldo)) + '*\n'
+        msg += '_Reduzir ' + fmt(mediaDiaria * 0.2) + '/dia equilibra o orcamento._'
+      } else {
+        msg += '✅ Projecao de *' + fmt(projecaoSaldo) + '* de saldo\n'
+        msg += '_Bom ritmo! Mantenham o controle._'
+      }
+
+      await sendMessage(user.telegram_id, msg)
+      await salvarContexto(user.casal_code, 'projecao_mes', msg, { dia, projecaoFim, projecaoSaldo })
+    }
+  } catch(e) { console.warn('projecaoMes:', e.message) }
+}
+
+// ── 3. Celebração de conquistas financeiras ───────────
+async function celebrarConquistas() {
+  try {
+    const now = new Date()
+    if (horaBRT() !== 20) return
+    const mes = now.getMonth(), ano = now.getFullYear()
+
+    const { data: usuarios } = await supabase.from('profiles')
+      .select('id,nome,casal_code,telegram_id,notif_dia')
+      .not('telegram_id','is',null)
+    if (!usuarios?.length) return
+    const casaisVistos = new Set()
+
+    for (const user of usuarios) {
+      if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
+      if (user.notif_dia === false) continue
+      casaisVistos.add(user.casal_code)
+
+      const [desps, recs, reserva, metas] = await Promise.all([
+        supabase.from('despesas').select('valor').eq('casal_code',user.casal_code).eq('mes',mes).eq('ano',ano),
+        supabase.from('receitas').select('valor').eq('casal_code',user.casal_code).eq('mes',mes).eq('ano',ano),
+        supabase.from('reserva').select('atual,meta').eq('user_id',user.id).maybeSingle(),
+        supabase.from('metas').select('nome,valor_alvo,valor_atual,atual').eq('casal_code',user.casal_code).eq('ativa',true),
+      ])
+
+      const totalDesp = (desps.data||[]).reduce((s,d)=>s+d.valor,0)
+      const totalRec  = (recs.data||[]).reduce((s,r)=>s+r.valor,0)
+      const saldo = totalRec - totalDesp
+      const r = reserva.data || { atual:0, meta:30000 }
+      const pctRes = r.meta > 0 ? Math.round((r.atual/r.meta)*100) : 0
+      const conquistas = []
+
+      // Primeiro mês no azul
+      const chaveAzul = 'conquista_azul_' + user.casal_code + '_' + mes + '_' + ano
+      const { data: jaAzul } = await supabase.from('bot_contextos').select('id')
+        .eq('casal_code',user.casal_code).eq('tipo','conquista_azul')
+        .gte('created_at', new Date(ano, mes, 1).toISOString()).maybeSingle()
+      if (saldo > 0 && !jaAzul) conquistas.push({ emoji:'💚', msg:'Mês no azul! Saldo positivo de ' + fmt(saldo), tipo:'conquista_azul' })
+
+      // Marcos da reserva
+      for (const marco of [25, 50, 75, 100]) {
+        if (pctRes >= marco) {
+          const { data: jaMarco } = await supabase.from('bot_contextos').select('id')
+            .eq('casal_code',user.casal_code).eq('tipo','conquista_reserva_'+marco).maybeSingle()
+          if (!jaMarco) conquistas.push({ emoji:'🛡', msg:'Reserva atingiu ' + marco + '%! (' + fmt(r.atual) + ')', tipo:'conquista_reserva_'+marco })
+        }
+      }
+
+      // Meta concluída
+      for (const meta of (metas.data||[])) {
+        const atual = meta.valor_atual||meta.atual||0
+        if (atual >= meta.valor_alvo) {
+          const { data: jaMeta } = await supabase.from('bot_contextos').select('id')
+            .eq('casal_code',user.casal_code).eq('tipo','conquista_meta_'+meta.nome).maybeSingle()
+          if (!jaMeta) conquistas.push({ emoji:'🎯', msg:'Meta "' + meta.nome + '" concluída! 🎉', tipo:'conquista_meta_'+meta.nome })
+        }
+      }
+
+      if (!conquistas.length) continue
+
+      let msg = '🌟 *Conquistas do jardim!*\n\n'
+      conquistas.forEach(c => { msg += c.emoji + ' ' + c.msg + '\n' })
+      msg += '\nCada conquista e uma semente do legado de voces. 🌿'
+      await sendMessage(user.telegram_id, msg)
+      for (const c of conquistas) {
+        await salvarContexto(user.casal_code, c.tipo, msg, { mes, ano })
+      }
+    }
+  } catch(e) { console.warn('celebrarConquistas:', e.message) }
+}
+
+// ── 4. Âncora semanal de comprometimento ─────────────
+async function ancoraSemanaldal() {
+  try {
+    const now = new Date()
+    // Envia na sexta-feira às 18h — para o casal pensar no fim de semana
+    if (now.getDay() !== 5 || horaBRT() !== 18) return
+
+    const { data: usuarios } = await supabase.from('profiles')
+      .select('id,nome,casal_code,telegram_id,notif_semanal')
+      .not('telegram_id','is',null)
+    if (!usuarios?.length) return
+    const casaisVistos = new Set()
+
+    for (const user of usuarios) {
+      if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
+      if (user.notif_semanal === false) continue
+      casaisVistos.add(user.casal_code)
+
+      const chave = 'ancora_' + user.casal_code + '_' + now.toISOString().split('T')[0]
+      const { data: jaEnviou } = await supabase.from('bot_contextos').select('id')
+        .eq('casal_code',user.casal_code).eq('tipo','ancora_semanal')
+        .gte('created_at', new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString())
+        .maybeSingle()
+      if (jaEnviou) continue
+
+      // Busca top 3 categorias do mês
+      const mes = now.getMonth(), ano = now.getFullYear()
+      const { data: desps } = await supabase.from('despesas').select('valor,categoria')
+        .eq('casal_code',user.casal_code).eq('mes',mes).eq('ano',ano)
+      const cats = {}
+      ;(desps||[]).forEach(d => { cats[d.categoria]=(cats[d.categoria]||0)+d.valor })
+      const top3 = Object.entries(cats).sort((a,b)=>b[1]-a[1]).slice(0,3)
+
+      let msg = '🎯 *Foco da semana*\n\n'
+      msg += 'Em qual categoria querem economizar esta semana?\n\n'
+      if (top3.length) {
+        msg += '📊 Maiores gastos do mes:\n'
+        top3.forEach(([cat,val],idx) => { msg += (idx+1) + '. ' + cat + ': ' + fmt(val) + '\n' })
+        msg += '\n'
+      }
+      msg += '_Escolham uma categoria e o Broto vai monitorar._'
+
+      const buttons = top3.map(([cat]) => [{ text: cat, callback_data: 'ancora_cat_' + cat }])
+      buttons.push([{ text: 'Outra categoria', callback_data: 'ancora_cat_outro' }])
+
+      await sendMessageButtons(user.telegram_id, msg, buttons)
+      await salvarContexto(user.casal_code, 'ancora_semanal', msg, { mes, ano, top3: top3.map(([c])=>c) })
+    }
+  } catch(e) { console.warn('ancoraSemanaldal:', e.message) }
+}
+
 const server = require('http').createServer((req,res) => {
   if (req.method==='POST'&&req.url==='/webhook') {
     let body=''
@@ -1551,6 +1825,10 @@ setInterval(async () => {
   try { await alertaChurn() } catch(e) { console.warn('cron churn:',e.message) }
   try { await alertaMetaParada() } catch(e) { console.warn('cron meta parada:',e.message) }
   try { await aprendizadoComportamental() } catch(e) { console.warn('cron comportamento:',e.message) }
+  try { await fechamentoMensal() } catch(e) { console.warn('cron fechamento:',e.message) }
+  try { await projecaoMes() } catch(e) { console.warn('cron projecao:',e.message) }
+  try { await celebrarConquistas() } catch(e) { console.warn('cron conquistas:',e.message) }
+  try { await ancoraSemanaldal() } catch(e) { console.warn('cron ancora:',e.message) }
 }, 60*60*1000) // a cada 1 hora
 
 server.listen(PORT, async () => {
