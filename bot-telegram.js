@@ -330,14 +330,31 @@ async function handleMenuCallback(callbackData, user, chatId) {
   const now = new Date()
 
   if (callbackData === 'menu_saldo') {
-    const { saldo, bancos, reserva } = await getResumo(user)
-    const pctRes = reserva.meta>0?((reserva.atual/reserva.meta)*100).toFixed(0):0
-    let t = `🌿 *${user.nome}*\n\n📊 Saldo do mês: *${fmt(saldo)}*\n\n🏦 *Contas:*\n`
-    bancos.forEach(b => {
-      const isPrincipal = b.id===user.banco_principal_id
-      t += `  ${isPrincipal?'⭐':'•'} ${b.banco}: *${fmt(b.saldo)}*\n`
-    })
-    t += `\n🛡 Reserva: *${fmt(reserva.atual)}* (${pctRes}%)`
+    const { saldo, reserva } = await getResumo(user)
+    const pctRes = reserva.meta>0?Math.round((reserva.atual/reserva.meta)*100):0
+    const { data:bancosAll } = await supabase.from('contas_banco').select('*').eq('casal_code',user.casal_code)
+    const bPrincipal  = (bancosAll||[]).filter(b=>!b.camada||b.camada==='principal')
+    const bPatrimonio = (bancosAll||[]).filter(b=>b.camada==='patrimonio')
+    const bReserva    = (bancosAll||[]).filter(b=>b.camada==='reserva')
+    const totPrincipal  = bPrincipal.reduce((s,b)=>s+b.saldo,0)
+    const totPatrimonio = bPatrimonio.reduce((s,b)=>s+b.saldo,0)
+    let t = '🌿 *' + user.nome + '*\n\n'
+    t += '💵 *Principal (fluxo do mês)*\n'
+    bPrincipal.forEach(b => { t += '  • ' + b.banco + ': *' + fmt(b.saldo, b.moeda) + '*\n' })
+    t += '  Total: *' + fmt(totPrincipal) + '*\n\n'
+    if (bReserva.length > 0 || reserva.atual > 0) {
+      t += '🛡 *Reserva de emergência*\n'
+      bReserva.forEach(b => { t += '  • ' + b.banco + ': *' + fmt(b.saldo, b.moeda) + '*\n' })
+      if (reserva.atual > 0) t += '  • Reserva: *' + fmt(reserva.atual) + '* (' + pctRes + '%)\n'
+      t += '\n'
+    }
+    if (bPatrimonio.length > 0) {
+      t += '📈 *Patrimônio investido*\n'
+      bPatrimonio.forEach(b => { t += '  • ' + b.banco + ': *' + fmt(b.saldo, b.moeda) + '*\n' })
+      t += '  Total: *' + fmt(totPatrimonio) + '*\n\n'
+    }
+    const totalGeral = totPrincipal + totPatrimonio + reserva.atual
+    t += '💎 *Patrimônio total: ' + fmt(totalGeral) + '*'
     await sendMessageButtons(chatId, t, [[{ text:'🔙 Menu', callback_data:'menu_inicio' }]])
     return
   }
