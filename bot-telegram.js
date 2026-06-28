@@ -14,6 +14,21 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   console.error('[FATAL] unhandledRejection:', reason)
 })
+process.on('exit', (code) => {
+  console.error('[EXIT] processo saindo com código:', code)
+})
+process.on('SIGTERM', () => {
+  console.log('[SIGTERM] recebido — Railway encerrando container')
+  process.exit(0)
+})
+
+console.log('[STARTUP] iniciando processo...')
+console.log('[STARTUP] TELEGRAM_TOKEN:', process.env.TELEGRAM_TOKEN ? 'ok' : 'FALTANDO')
+console.log('[STARTUP] SUPABASE_URL:', process.env.SUPABASE_URL ? 'ok' : 'FALTANDO')
+console.log('[STARTUP] SUPABASE_ANON:', process.env.SUPABASE_ANON ? 'ok' : 'FALTANDO')
+console.log('[STARTUP] GROQ_API_KEY:', process.env.GROQ_API_KEY ? 'ok' : 'FALTANDO')
+console.log('[STARTUP] ANTHROPIC_API_KEY:', process.env.ANTHROPIC_API_KEY ? 'ok' : 'FALTANDO')
+console.log('[STARTUP] PORT:', process.env.PORT || 3000)
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN
 const SUPABASE_URL   = process.env.SUPABASE_URL
