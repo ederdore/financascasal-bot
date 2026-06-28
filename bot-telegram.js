@@ -6,6 +6,15 @@ const http  = require('http')
 const https = require('https')
 const { createClient } = require('@supabase/supabase-js')
 
+// ── Captura global de erros ───────────────────────────
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] uncaughtException:', err.message)
+  console.error(err.stack)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] unhandledRejection:', reason)
+})
+
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN
 const SUPABASE_URL   = process.env.SUPABASE_URL
 const SUPABASE_ANON  = process.env.SUPABASE_ANON
@@ -2016,6 +2025,7 @@ setInterval(async () => {
 // Log imediato ao iniciar para confirmar que o cron está ativo
 console.log('[BOT] Iniciado. Hora BRT:', horaBRT(), '| Inicio dia BRT:', inicioDiaBRT())
 
+server.on('error', (e) => console.error('[SERVER ERROR]', e.message))
 server.listen(PORT, async () => {
   console.log(`🌿 Éden Bot na porta ${PORT}`)
   const domain=process.env.RAILWAY_PUBLIC_DOMAIN||process.env.RAILWAY_STATIC_URL
