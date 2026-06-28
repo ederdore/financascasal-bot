@@ -101,6 +101,13 @@ function horaBRT() {
   return (new Date().getUTCHours() - 3 + 24) % 24
 }
 
+function inicioDiaBRT() {
+  // Retorna o início do dia atual no fuso BRT (UTC-3)
+  const now = new Date()
+  const brt = new Date(now.getTime() - 3 * 60 * 60 * 1000)
+  return new Date(brt.getFullYear(), brt.getMonth(), brt.getDate()).toISOString()
+}
+
 const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 const DIAS  = ['domingo','segunda','terça','quarta','quinta','sexta','sábado']
 const CAT_ICONS = { Alimentação:'🛒',Moradia:'🏠',Transporte:'🚗',Saúde:'💊',Lazer:'🎉',Educação:'📚',Assinaturas:'📺',Investimento:'📈',Outros:'💸' }
@@ -757,9 +764,9 @@ async function verificarDiaSemGasto() {
       casaisVistos.add(user.casal_code)
       const chatId=user.telegram_id; if (!chatId) continue
       // Verifica no banco se já enviou hoje
-      const { data:jaEnviouHoje } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).eq('tipo','nudge_dia').gte('created_at',new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString()).maybeSingle()
+      const { data:jaEnviouHoje } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).eq('tipo','nudge_dia').gte('created_at',inicioDiaBRT()).maybeSingle()
       if (jaEnviouHoje) continue
-      const { data:gastosHoje } = await supabase.from('despesas').select('valor').eq('casal_code',user.casal_code).eq('mes',mes).eq('ano',ano).gte('created_at',new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString())
+      const { data:gastosHoje } = await supabase.from('despesas').select('valor').eq('casal_code',user.casal_code).eq('mes',mes).eq('ano',ano).gte('created_at',inicioDiaBRT())
       const totalHoje=(gastosHoje||[]).reduce((s,d)=>s+d.valor,0)
       const { data:gastosUltimos30 } = await supabase.from('despesas').select('valor').eq('casal_code',user.casal_code).gte('created_at',new Date(Date.now()-30*24*60*60*1000).toISOString())
       const totalUltimos30=(gastosUltimos30||[]).reduce((s,d)=>s+d.valor,0)
@@ -1146,7 +1153,7 @@ async function enviarSaudesSemanal() {
       if (user.notif_semanal === false) continue
       casaisVistos.add(user.casal_code)
       const chatId = user.telegram_id
-      const { data:jaEnviouSemanal } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).eq('tipo','saude_semanal').gte('created_at',new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString()).maybeSingle()
+      const { data:jaEnviouSemanal } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).eq('tipo','saude_semanal').gte('created_at',inicioDiaBRT()).maybeSingle()
       if (jaEnviouSemanal) continue
       ctxMap.set(chave, true)
       const now7 = new Date(Date.now()-7*24*60*60*1000)
@@ -1238,7 +1245,7 @@ async function alertaContasHoje() {
       casaisVistos.add(user.casal_code)
       const { data:jaEnviouContas } = await supabase.from('bot_contextos')
         .select('id').eq('casal_code', user.casal_code).eq('tipo', 'alerta_vencimento_hoje')
-        .gte('created_at', new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString())
+        .gte('created_at', inicioDiaBRT())
         .maybeSingle()
       if (jaEnviouContas) continue
       const [contasHoje, cartoes] = await Promise.all([
@@ -1318,7 +1325,7 @@ async function alertaSaldoBaixo() {
     if (!usuarios?.length) return
     for (const user of usuarios) {
       if (user.notif_dia === false) continue
-      const { data:jaEnviouSaldo } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).eq('tipo','alerta_saldo_baixo').gte('created_at',new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString()).maybeSingle()
+      const { data:jaEnviouSaldo } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).eq('tipo','alerta_saldo_baixo').gte('created_at',inicioDiaBRT()).maybeSingle()
       if (jaEnviouSaldo) continue
       const { data:banco } = await supabase.from('contas_banco').select('banco,saldo')
         .eq('id', user.banco_principal_id).maybeSingle()
@@ -1353,7 +1360,7 @@ async function alertaChurn() {
       if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
       if (user.notif_dia === false) continue
       casaisVistos.add(user.casal_code)
-      const { data:jaEnviouChurn } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).eq('tipo','alerta_churn').gte('created_at',new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString()).maybeSingle()
+      const { data:jaEnviouChurn } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).eq('tipo','alerta_churn').gte('created_at',inicioDiaBRT()).maybeSingle()
       if (jaEnviouChurn) continue
       const { data:ultimos } = await supabase.from('despesas').select('created_at')
         .eq('casal_code',user.casal_code)
@@ -1440,9 +1447,9 @@ async function aprendizadoComportamental() {
       if (!user.casal_code || casaisVistos.has(user.casal_code)) continue
       if (user.notif_dia === false) continue
       casaisVistos.add(user.casal_code)
-      const { data:jaEnviouComp } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).in('tipo',['comportamento_dia_sem_gasto','comportamento_fim_dia']).gte('created_at',new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString()).maybeSingle()
+      const { data:jaEnviouComp } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).in('tipo',['comportamento_dia_sem_gasto','comportamento_fim_dia']).gte('created_at',inicioDiaBRT()).maybeSingle()
       if (jaEnviouComp) continue
-      const inicioDia = new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString()
+      const inicioDia = inicioDiaBRT()
       const { data:gastosHoje } = await supabase.from('despesas').select('valor,categoria,nome')
         .eq('casal_code',user.casal_code).gte('created_at',inicioDia)
       const totalHoje = (gastosHoje||[]).reduce((s,d)=>s+d.valor,0)
@@ -1779,7 +1786,7 @@ async function ancoraSemanaldal() {
       const chave = 'ancora_' + user.casal_code + '_' + now.toISOString().split('T')[0]
       const { data: jaEnviou } = await supabase.from('bot_contextos').select('id')
         .eq('casal_code',user.casal_code).eq('tipo','ancora_semanal')
-        .gte('created_at', new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString())
+        .gte('created_at', inicioDiaBRT())
         .maybeSingle()
       if (jaEnviou) continue
 
@@ -1838,7 +1845,7 @@ async function verificarCelebracoes() {
       const semanaAtras = new Date(Date.now() - 7*24*60*60*1000).toISOString()
       const [despsHoje, despsSemana, despsAntSemana, reserva] = await Promise.all([
         supabase.from('despesas').select('valor,categoria,tipo_compra').eq('casal_code',user.casal_code)
-          .gte('created_at', new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString()),
+          .gte('created_at', inicioDiaBRT()),
         supabase.from('despesas').select('valor,categoria').eq('casal_code',user.casal_code)
           .gte('created_at', semanaAtras),
         supabase.from('despesas').select('valor,categoria').eq('casal_code',user.casal_code)
@@ -1871,11 +1878,7 @@ async function verificarCelebracoes() {
             const dicaCelebr = await chamarClaude(promptCelebr)
             celebracoes.push({
               tipo: 'celebracao_reducao_' + cat,
-              msg: '🎉 *' + nomesDupla + ', vocês reduziram ' + cat + ' em ' + pct + '%!*
-
-Economizaram *' + fmt(reducao) + '* essa semana.
-
-' + (dicaCelebr || 'Que tal celebrar com um programa especial juntos? Vocês merecem! 🌹'),
+              msg: '🎉 *' + nomesDupla + ', voces reduziram ' + cat + ' em ' + pct + '%!*\n\nEconomizaram *' + fmt(reducao) + '* essa semana.\n\n' + (dicaCelebr || 'Que tal celebrar com um programa especial juntos? Voces merecem!'),
             })
           }
         }
@@ -1891,18 +1894,12 @@ Economizaram *' + fmt(reducao) + '* essa semana.
         if (!jaImp) {
           celebracoes.push({
             tipo: 'celebracao_sem_impulsiva',
-            msg: '🌟 *Uma semana de decisões conscientes!*
-
-' + nomesDupla + ', toda compra desta semana foi planejada.
-
-Isso é raro e merece ser celebrado. 🌿
-
-_Escolham um programa juntos esse fim de semana — vocês construíram algo bonito._',
+            msg: '🌟 *Uma semana de decisoes conscientes!*\n\n' + nomesDupla + ', toda compra desta semana foi planejada.\n\nIsso e raro e merece ser celebrado. 🌿\n\n_Escolham um programa juntos esse fim de semana._',
           })
         }
       }
 
-      // 3. Marcos da reserva com celebração
+      // 3. Marcos da reserva com celebracao
       const r = reserva.data || { atual:0, meta:30000 }
       const pctRes = r.meta > 0 ? Math.round((r.atual/r.meta)*100) : 0
       for (const marco of [25, 50, 75, 100]) {
@@ -1911,28 +1908,10 @@ _Escolham um programa juntos esse fim de semana — vocês construíram algo bon
             .eq('casal_code',user.casal_code).eq('tipo','celebracao_reserva_'+marco).maybeSingle()
           if (!jaMarco) {
             const msgs = {
-              25:  '🛡 *25% da reserva! O jardim tem raízes agora.*
-
-' + nomesDupla + ', o primeiro escudo está plantado.
-
-_Comemorem com algo simples e especial — um jantar em casa com velas conta muito. 🕯️_',
-              50:  '🛡 *Metade da reserva! O jardim está ficando sólido.*
-
-' + nomesDupla + ', isso é uma conquista real.
-
-_Que tal aquele restaurante que vocês estavam querendo ir? Vocês merecem celebrar ao vivo. 🍷_',
-              75:  '🛡 *75% da reserva! Quase lá.*
-
-O jardim de ' + nomesDupla + ' está protegido.
-
-_Planejem uma experiência juntos — uma saída, um passeio. Celebrar o caminho é tão importante quanto chegar. 🌹_',
-              100: '🌳 *Reserva completa! Jardim totalmente protegido.*
-
-' + nomesDupla + ', isso é liberdade.
-
-Vocês construíram a fundação que a maioria dos casais nunca tem.
-
-_Celebrem de verdade — um jantar especial, uma viagem curta. Vocês viveram com consciência para chegar aqui. 🥂_',
+              25:  '🛡 *25% da reserva!*\n\n' + nomesDupla + ', o primeiro escudo esta plantado.\n\n_Comemorem com algo simples — um jantar em casa com velas. 🕯️_',
+              50:  '🛡 *Metade da reserva!*\n\n' + nomesDupla + ', isso e uma conquista real.\n\n_Que tal aquele restaurante que voces queriam? Voces merecem. 🍷_',
+              75:  '🛡 *75% da reserva!*\n\nO jardim de ' + nomesDupla + ' esta protegido.\n\n_Planejem uma saida juntos — celebrar o caminho e tao importante quanto chegar. 🌹_',
+              100: '🌳 *Reserva completa!*\n\n' + nomesDupla + ', isso e liberdade.\n\nVoces construiram a fundacao que a maioria dos casais nunca tem.\n\n_Celebrem de verdade — um jantar especial, uma viagem. 🥂_',
             }
             celebracoes.push({ tipo: 'celebracao_reserva_'+marco, msg: msgs[marco] })
           }
@@ -1968,7 +1947,7 @@ async function mensagemFimDeSemana() {
 
       const { data:jaEnviou } = await supabase.from('bot_contextos').select('id')
         .eq('casal_code',user.casal_code).eq('tipo','fim_de_semana')
-        .gte('created_at', new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString())
+        .gte('created_at', inicioDiaBRT())
         .maybeSingle()
       if (jaEnviou) continue
 
@@ -1986,12 +1965,7 @@ async function mensagemFimDeSemana() {
       const prompt = 'Casal brasileiro chamado ' + nomesDupla + ' gastou ' + fmt(totalSemana) + ' essa semana. É sexta-feira. Sugira algo especial e acessível para eles aproveitarem o fim de semana juntos — pode ser um programa em casa, ao ar livre ou um programa simples. Seja caloroso, celebre que eles terminaram mais uma semana. Use metáfora do jardim. Máximo 3 frases.'
       const dica = await chamarClaude(prompt)
 
-      const msg = '🌅 *Boa sexta-feira, ' + nomesDupla + '!*
-
-A semana passou e o jardim continua crescendo.
-
-' + (dica || 'Aproveitem o fim de semana juntos — o jardim que vocês cultivam merece ser celebrado ao vivo. 🌹')
-
+      const msg = '🌅 *Boa sexta-feira, ' + nomesDupla + '!*\n\nA semana passou e o jardim continua crescendo.\n\n' + (dica || 'Aproveitem o fim de semana juntos. 🌹')
       await sendMessage(user.telegram_id, msg)
       await salvarContexto(user.casal_code, 'fim_de_semana', msg, { totalSemana })
     }
@@ -2038,6 +2012,9 @@ setInterval(async () => {
   try { await verificarCelebracoes() } catch(e) { console.warn('cron celebracoes:',e.message) }
   try { await mensagemFimDeSemana() } catch(e) { console.warn('cron fimdesemana:',e.message) }
 }, 60*60*1000) // a cada 1 hora
+
+// Log imediato ao iniciar para confirmar que o cron está ativo
+console.log('[BOT] Iniciado. Hora BRT:', horaBRT(), '| Inicio dia BRT:', inicioDiaBRT())
 
 server.listen(PORT, async () => {
   console.log(`🌿 Éden Bot na porta ${PORT}`)
