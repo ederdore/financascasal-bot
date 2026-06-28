@@ -18,8 +18,8 @@ process.on('exit', (code) => {
   console.error('[EXIT] processo saindo com código:', code)
 })
 process.on('SIGTERM', () => {
-  console.log('[SIGTERM] recebido — Railway encerrando container')
-  process.exit(0)
+  console.log('[SIGTERM] recebido — ignorando para manter o bot ativo')
+  // Não encerra — mantém o bot rodando
 })
 
 console.log('[STARTUP] iniciando processo...')
@@ -2036,6 +2036,18 @@ setInterval(async () => {
   try { await verificarCelebracoes() } catch(e) { console.warn('cron celebracoes:',e.message) }
   try { await mensagemFimDeSemana() } catch(e) { console.warn('cron fimdesemana:',e.message) }
 }, 60*60*1000) // a cada 1 hora
+
+// Keep-alive — ping no próprio health check a cada 4 minutos
+setInterval(() => {
+  const domain = process.env.RAILWAY_PUBLIC_DOMAIN || process.env.RAILWAY_STATIC_URL
+  if (!domain) return
+  const https = require('https')
+  https.get('https://' + domain + '/health', (res) => {
+    console.log('[KEEP-ALIVE] ping ok:', res.statusCode)
+  }).on('error', (e) => {
+    console.warn('[KEEP-ALIVE] erro:', e.message)
+  })
+}, 4 * 60 * 1000)
 
 // Log imediato ao iniciar para confirmar que o cron está ativo
 console.log('[BOT] Iniciado. Hora BRT:', horaBRT(), '| Inicio dia BRT:', inicioDiaBRT())
