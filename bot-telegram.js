@@ -16,10 +16,16 @@ process.on('unhandledRejection', (reason) => {
 })
 process.on('exit', (code) => {
   console.error('[EXIT] processo saindo com código:', code)
+  if (code === 0) {
+    console.error('[EXIT] saída limpa detectada — isso não deveria acontecer')
+  }
 })
 process.on('SIGTERM', () => {
-  console.log('[SIGTERM] recebido — ignorando para manter o bot ativo')
-  // Não encerra — mantém o bot rodando
+  console.log('[SIGTERM] recebido — mantendo bot ativo')
+})
+
+process.on('SIGINT', () => {
+  console.log('[SIGINT] recebido — mantendo bot ativo')
 })
 
 console.log('[STARTUP] iniciando processo...')
@@ -2053,15 +2059,23 @@ setInterval(() => {
 console.log('[BOT] Iniciado. Hora BRT:', horaBRT(), '| Inicio dia BRT:', inicioDiaBRT())
 
 server.on('error', (e) => console.error('[SERVER ERROR]', e.message))
-server.listen(PORT, async () => {
-  console.log(`🌿 Éden Bot na porta ${PORT}`)
-  const domain=process.env.RAILWAY_PUBLIC_DOMAIN||process.env.RAILWAY_STATIC_URL
-  if (domain) {
-    const webhookUrl=`https://${domain}/webhook`
-    console.log(`📡 Registrando webhook: ${webhookUrl}`)
-    await setWebhook(webhookUrl)
-  } else {
-    console.log('⚠️  RAILWAY_PUBLIC_DOMAIN não encontrado')
-  }
-  console.log('🌿 Bot pronto! Finanças a dois, sem segredos.')
+server.listen(PORT, () => {
+  console.log('🌿 Éden Bot na porta ' + PORT)
+  console.log('[HEALTH] servidor pronto para health checks em /health')
+  // Registra webhook após servidor estar pronto
+  setTimeout(async () => {
+    try {
+      const domain = process.env.RAILWAY_PUBLIC_DOMAIN || process.env.RAILWAY_STATIC_URL
+      if (domain) {
+        const webhookUrl = 'https://' + domain + '/webhook'
+        console.log('📡 Registrando webhook: ' + webhookUrl)
+        await setWebhook(webhookUrl)
+      } else {
+        console.log('⚠️  RAILWAY_PUBLIC_DOMAIN não encontrado')
+      }
+      console.log('🌿 Bot pronto! Finanças a dois, sem segredos.')
+    } catch(e) {
+      console.error('[WEBHOOK ERROR]', e.message)
+    }
+  }, 2000) // aguarda 2s para garantir que health check já passou
 })
