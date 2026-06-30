@@ -1185,7 +1185,6 @@ async function enviarSaudesSemanal() {
       const chatId = user.telegram_id
       const { data:jaEnviouSemanal } = await supabase.from('bot_contextos').select('id').eq('casal_code',user.casal_code).eq('tipo','saude_semanal').gte('created_at',inicioDiaBRT()).maybeSingle()
       if (jaEnviouSemanal) continue
-      ctxMap.set(chave, true)
       const now7 = new Date(Date.now()-7*24*60*60*1000)
       const mes = now.getMonth(), ano = now.getFullYear()
       const [desps,recs,reserva,metas] = await Promise.all([
@@ -1285,7 +1284,6 @@ async function alertaContasHoje() {
       const contasVencemHoje = contasHoje.data || []
       const cartoesVencemHoje = (cartoes.data||[]).filter(c => c.dia_vencimento === hoje)
       if (!contasVencemHoje.length && !cartoesVencemHoje.length) continue
-      ctxMap.set(chave, true)
       let msg = '⏰ *Vence hoje!*\n\n'
       contasVencemHoje.forEach(c => { msg += '\u{1F4CB} ' + c.nome + ': *' + fmt(c.valor) + '*\n' })
       cartoesVencemHoje.forEach(c => { msg += '\u{1F4B3} Fatura ' + c.nome + ': *' + fmt(c.fatura) + '*\n' })
@@ -1362,7 +1360,6 @@ async function alertaSaldoBaixo() {
       if (!banco) continue
       const limite = user.saldo_minimo_alerta || 500
       if (banco.saldo < limite) {
-        ctxMap.set(chave, true)
         const msg = `⚠️ *Saldo baixo!*
 
 🏦 ${banco.banco}: *${fmt(banco.saldo)}*
@@ -1399,7 +1396,6 @@ async function alertaChurn() {
       const ultimoLanc = new Date(ultimos[0].created_at)
       const diasSem = Math.floor((now - ultimoLanc) / (24*60*60*1000))
       if (diasSem >= 3) {
-        ctxMap.set(chave, true)
         const msg = `🌱 *${user.nome}, seu jardim está esperando!*
 
 Faz *${diasSem} dias* sem novos lançamentos.
@@ -1493,7 +1489,6 @@ async function aprendizadoComportamental() {
       const mediaHistorica = mesmodia.length > 0 ? mesmodia.reduce((s,d)=>s+d.valor,0)/mesmodia.length : 0
       if (totalHoje === 0 && mediaHistorica > 0) {
         // Dia sem gasto — parabeniza com contexto histórico
-        ctxMap.set(chave, true)
         const economia = Math.round(mediaHistorica)
         const diasSemGasto = mesmodia.filter(d=>d.valor===0).length
         const prompt = `Casal economizou hoje. Média histórica nas ${DIAS[diaSemana]}s: R$${economia}. Total de dias sem gasto recentes: ${diasSemGasto}. Objetivo: ${user.objetivo||'controle'}. Parabenize em 1-2 frases usando metáforas de jardim. Seja caloroso e específico.`
@@ -1506,7 +1501,6 @@ async function aprendizadoComportamental() {
         await salvarContexto(user.casal_code,'comportamento_dia_sem_gasto',msg,{totalHoje,mediaHistorica:economia})
       } else if (totalHoje > 0 && mediaHistorica > 0) {
         // Teve gastos — compara com histórico
-        ctxMap.set(chave, true)
         const diff = totalHoje - mediaHistorica
         const pct = Math.abs(Math.round((diff/mediaHistorica)*100))
         const acimaDaMedia = diff > mediaHistorica * 0.2
