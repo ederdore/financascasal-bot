@@ -207,11 +207,13 @@ async function getUser(telegramId) {
   return data
 }
 
-async function getResumo(user) {
+async function getResumo(user, mes=null, ano=null) {
   const now = new Date()
+  const m = mes !== null ? mes : now.getMonth()
+  const a = ano !== null ? ano : now.getFullYear()
   const [d,r,b,res] = await Promise.all([
-    supabase.from('despesas').select('valor,quem,categoria').eq('casal_code',user.casal_code).eq('mes',now.getMonth()).eq('ano',now.getFullYear()),
-    supabase.from('receitas').select('valor,quem').eq('casal_code',user.casal_code).eq('mes',now.getMonth()).eq('ano',now.getFullYear()),
+    supabase.from('despesas').select('valor,quem,categoria').eq('casal_code',user.casal_code).eq('mes',m).eq('ano',a),
+    supabase.from('receitas').select('valor,quem').eq('casal_code',user.casal_code).eq('mes',m).eq('ano',a),
     supabase.from('contas_banco').select('banco,saldo,id').eq('casal_code',user.casal_code),
     supabase.from('reserva').select('atual,meta').eq('user_id',user.id).maybeSingle(),
   ])
@@ -398,8 +400,16 @@ async function handleMenuCallback(callbackData, user, chatId) {
 
   if (callbackData === 'menu_resumo') {
     await sendAction(chatId, 'typing')
-    const { totalRec, totalDesp, saldo, bancos, reserva } = await getResumo(user)
-    const m = now.getMonth(), ano = now.getFullYear()
+    let m = now.getMonth(), ano = now.getFullYear()
+    // Se início do mês, verifica se há dados — senão mostra mês anterior
+    let { totalRec, totalDesp, saldo, bancos, reserva } = await getResumo(user, m, ano)
+    if (totalRec === 0 && totalDesp === 0 && now.getDate() <= 5) {
+      m = m === 0 ? 11 : m - 1
+      ano = m === 11 ? ano - 1 : ano
+      const dadosAnt = await getResumo(user, m, ano)
+      totalRec = dadosAnt.totalRec; totalDesp = dadosAnt.totalDesp
+      saldo = dadosAnt.saldo; bancos = dadosAnt.bancos; reserva = dadosAnt.reserva
+    }
 
     // Métricas base
     const taxaPoupanca = totalRec > 0 ? Math.round(((totalRec-totalDesp)/totalRec)*100) : 0
@@ -444,29 +454,29 @@ async function handleMenuCallback(callbackData, user, chatId) {
       .select('nome,valor_alvo,valor_atual,atual').eq('casal_code',user.casal_code).eq('ativa',true)
 
     // Monta mensagem base
-    let msg = '\U0001f4ca *Resumo de ' + MESES[m] + '*\n\n'
-    msg += '\U0001f4b0 Receitas: *' + fmt(totalRec) + '*\n'
-    msg += '\U0001f4b8 Gastos: *' + fmt(totalDesp) + '*'
+    let msg = '📊 *Resumo de ' + MESES[m] + '*\n\n'
+    msg += '💰 Receitas: *' + fmt(totalRec) + '*\n'
+    msg += '💸 Gastos: *' + fmt(totalDesp) + '*'
     if (totalAnt > 0) { const diffAnt = totalDesp - totalAnt; msg += ' (' + (diffAnt>0?'+':'') + fmt(diffAnt) + ' vs ' + MESES[mAnt] + ')' }
     msg += '\n'
-    msg += (saldo>=0?'\u2705':'\U0001f534') + ' Saldo: *' + fmt(saldo) + '*\n\n'
-    msg += '\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n'
-    msg += '\U0001f4c8 *Inteligencia financeira:*\n\n'
-    const emojP = taxaPoupanca>=20?'\U0001f31f':taxaPoupanca>=10?'\U0001f33f':taxaPoupanca>=0?'\U0001f331':'\U0001f534'
+    msg += (saldo>=0?'✅':'🔴') + ' Saldo: *' + fmt(saldo) + '*\n\n'
+    msg += '━━━━━━━━━━━━━━━━\n'
+    msg += '📈 *Inteligencia financeira:*\n\n'
+    const emojP = taxaPoupanca>=20?'🌟':taxaPoupanca>=10?'🌿':taxaPoupanca>=0?'🌱':'🔴'
     msg += emojP + ' Taxa de poupanca: *' + taxaPoupanca + '%*'
-    if (taxaPoupanca>=20) msg += ' \u2014 excelente!\n'
-    else if (taxaPoupanca>=10) msg += ' \u2014 bom caminho!\n'
-    else if (taxaPoupanca>=0) msg += ' \u2014 pode melhorar\n'
-    else msg += ' \u2014 mes no vermelho\n'
-    const emojR = pctRes>=100?'\U0001f6e1':pctRes>=50?'\U0001f33f':pctRes>0?'\U0001f331':'\u26a0\ufe0f'
+    if (taxaPoupanca>=20) msg += ' — excelente!\n'
+    else if (taxaPoupanca>=10) msg += ' — bom caminho!\n'
+    else if (taxaPoupanca>=0) msg += ' — pode melhorar\n'
+    else msg += ' — mes no vermelho\n'
+    const emojR = pctRes>=100?'🛡':pctRes>=50?'🌿':pctRes>0?'🌱':'⚠️'
     msg += emojR + ' Reserva: *' + pctRes + '%* de ' + fmt(reserva.meta) + '\n'
-    msg += '\U0001f3e6 Patrimonio: *' + fmt(saldoBancos + reserva.atual) + '*\n\n'
-    msg += '\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n'
-    msg += '\U0001f50d *Top 5 categorias:*\n'
+    msg += '🏦 Patrimonio: *' + fmt(saldoBancos + reserva.atual) + '*\n\n'
+    msg += '━━━━━━━━━━━━━━━━\n'
+    msg += '🔍 *Top 5 categorias:*\n'
     top5.forEach(([cat,dados],i) => {
       const pct = totalDesp > 0 ? Math.round((dados.total/totalDesp)*100) : 0
       const antVal = catMapAnt[cat] || 0
-      const trend = antVal > 0 ? (dados.total > antVal*1.1 ? ' \u2191' : dados.total < antVal*0.9 ? ' \u2193' : '') : ''
+      const trend = antVal > 0 ? (dados.total > antVal*1.1 ? ' ↑' : dados.total < antVal*0.9 ? ' ↓' : '') : ''
       msg += (i+1) + '. ' + cat + ': *' + fmt(dados.total) + '* (' + pct + '%)' + trend + '\n'
     })
     if (totalImprevistos > 0) {
@@ -507,7 +517,7 @@ async function handleMenuCallback(callbackData, user, chatId) {
     const analise = await chamarClaude(promptClaude)
 
     if (analise?.trim()) {
-      await sendMessage(user.telegram_id, '\U0001f331 *Broto analisa:*\n\n' + analise.trim())
+      await sendMessage(user.telegram_id, '🌱 *Broto analisa:*\n\n' + analise.trim())
     }
 
     // Planejamento do proximo mes
@@ -520,11 +530,11 @@ async function handleMenuCallback(callbackData, user, chatId) {
       'De 3 metas numericas especificas para o proximo mes. Seja direto e pratico. Maximo 4 frases.'
     const plano = await chamarClaude(promptPlan)
     if (plano?.trim()) {
-      await sendMessage(user.telegram_id, '\U0001f5d3 *Planejamento para ' + MESES[(m+1)%12] + ':*\n\n' + plano.trim())
+      await sendMessage(user.telegram_id, '🗓 *Planejamento para ' + MESES[(m+1)%12] + ':*\n\n' + plano.trim())
     }
     await sendMessageButtons(user.telegram_id, 'O que deseja fazer?', [
-      [{ text:'\U0001f3af Ver metas', callback_data:'menu_metas' },{ text:'\U0001f6e1 Reserva', callback_data:'menu_reserva' }],
-      [{ text:'\U0001f519 Menu', callback_data:'menu_inicio' }],
+      [{ text:'🎯 Ver metas', callback_data:'menu_metas' },{ text:'🛡 Reserva', callback_data:'menu_reserva' }],
+      [{ text:'🔙 Menu', callback_data:'menu_inicio' }],
     ])
     return
   }
@@ -1306,7 +1316,7 @@ async function enviarSaudesSemanal() {
       const prompt=`Consultor financeiro para casais brasileiros. Semana: gastaram ${fmt(totalDesp)}, receitas ${fmt(totalRec)}, saldo ${fmt(saldo)}. Top categorias: ${top3.map(([c,v])=>`${c}: ${fmt(v)}`).join(', ')}. Reserva: ${pctRes}%. Objetivo: ${user.objetivo||'controle'}. Gere UMA mensagem motivadora de no máximo 2 frases sobre o jardim financeiro. Use metáforas de jardim.`
       const dica=await chamarGroq(prompt)
       let msg = fase.e + ' *Como está seu jardim esta semana?*\n\n'
-      msg += '\U0001f321 Saúde: *' + score + '%* \u2014 ' + fase.nome + '\n\n'
+      msg += '\U0001f321 Saúde: *' + score + '%* — ' + fase.nome + '\n\n'
       msg += '📊 *Resumo da semana:*\n'
       msg += '💰 Receitas: ' + fmt(totalRec) + '\n'
       msg += '💸 Gastos: ' + fmt(totalDesp) + '\n'
