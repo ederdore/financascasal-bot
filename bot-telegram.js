@@ -399,37 +399,200 @@ async function handleMenuCallback(callbackData, user, chatId) {
   if (callbackData === 'menu_resumo') {
     await sendAction(chatId, 'typing')
     const { totalRec, totalDesp, saldo, bancos, reserva } = await getResumo(user)
-    const m = now.getMonth()
+    const m = now.getMonth(), ano = now.getFullYear()
+
+    // Métricas base
     const taxaPoupanca = totalRec > 0 ? Math.round(((totalRec-totalDesp)/totalRec)*100) : 0
     const pctRes = reserva.meta > 0 ? Math.round((reserva.atual/reserva.meta)*100) : 0
     const saldoBancos = bancos.reduce((s,b)=>s+b.saldo,0)
-    const { data:metas } = await supabase.from('metas').select('nome,valor_alvo,valor_atual,atual').eq('casal_code',user.casal_code).eq('ativa',true).limit(3)
-    let msg = '📊 *Resumo de ' + MESES[m] + '*\n\n'
-    msg += '💰 Receitas: *' + fmt(totalRec) + '*\n'
-    msg += '💸 Gastos: *' + fmt(totalDesp) + '*\n'
-    msg += (saldo>=0?'✅':'🔴') + ' Saldo: *' + fmt(saldo) + '*\n\n'
-    msg += '━━━━━━━━━━━━━━━━\n'
-    msg += '📈 *Intelig\u00eancia financeira:*\n\n'
+
+    // Busca categorias do mês atual
+    const { data:despsDetalhes } = await supabase.from('despesas')
+      .select('valor,categoria,tipo_compra,nome')
+      .eq('casal_code',user.casal_code).eq('mes',m).eq('ano',ano)
+
+    // Top 5 categorias
+    const catMap = {}
+    ;(despsDetalhes||[]).forEach(d => {
+      if (!catMap[d.categoria]) catMap[d.categoria] = { total:0, qtd:0 }
+      catMap[d.categoria].total += d.valor
+      catMap[d.categoria].qtd++
+    })
+    const top5 = Object.entries(catMap)
+      .sort((a,b)=>b[1].total-a[1].total)
+      .slice(0,5)
+
+    // Gastos imprevistos
+    const imprevistos = (despsDetalhes||[]).filter(d=>d.tipo_compra==='impulsiva')
+    const totalImprevistos = imprevistos.reduce((s,d)=>s+d.valor,0)
+
+    // Busca mês anterior para comparativo
+    const mAnt = m === 0 ? 11 : m-1
+    const aAnt = m === 0 ? ano-1 : ano
+    const { data:despsAnt } = await supabase.from('despesas')
+      .select('valor,categoria')
+      .eq('casal_code',user.casal_code).eq('mes',mAnt).eq('ano',aAnt)
+
+    const catMapAnt = {}
+    ;(despsAnt||[]).forEach(d => {
+      catMapAnt[d.categoria] = (catMapAnt[d.categoria]||0) + d.valor
+    })
+    const totalAnt = (despsAnt||[]).reduce((s,d)=>s+d.valor,0)
+
+    // Busca metas
+    const { data:metas } = await supabase.from('metas')
+      .select('nome,valor_alvo,valor_atual,atual').eq('casal_code',user.casal_code).eq('ativa',true)
+
+    // Monta mensagem base
+    let msg = '📊 *Resumo de ' + MESES[m] + '*
+
+'
+    msg += '💰 Receitas: *' + fmt(totalRec) + '*
+'
+    msg += '💸 Gastos: *' + fmt(totalDesp) + '*'
+    if (totalAnt > 0) {
+      const diffAnt = totalDesp - totalAnt
+      msg += ' (' + (diffAnt > 0 ? '+' : '') + fmt(diffAnt) + ' vs ' + MESES[mAnt] + ')'
+    }
+    msg += '
+'
+    msg += (saldo>=0?'✅':'🔴') + ' Saldo: *' + fmt(saldo) + '*
+
+'
+
+    // Inteligência financeira
+    msg += '━━━━━━━━━━━━━━━━
+'
+    msg += '📈 *Inteligência financeira:*
+
+'
+
     const emojP = taxaPoupanca>=20?'🌟':taxaPoupanca>=10?'🌿':taxaPoupanca>=0?'🌱':'🔴'
-    msg += emojP + ' Taxa de poupan\u00e7a: *' + taxaPoupanca + '%*'
-    if (taxaPoupanca>=20) msg += ' \u2014 excelente!\n'
-    else if (taxaPoupanca>=10) msg += ' \u2014 bom caminho!\n'
-    else if (taxaPoupanca>=0) msg += ' \u2014 pode melhorar\n'
-    else msg += ' \u2014 m\u00eas no vermelho\n'
+    msg += emojP + ' Taxa de poupança: *' + taxaPoupanca + '%*'
+    msg += taxaPoupanca>=20?' — excelente!
+':taxaPoupanca>=10?' — bom caminho!
+':taxaPoupanca>=0?' — pode melhorar
+':' — mês no vermelho
+'
+
     const emojR = pctRes>=100?'🛡':pctRes>=50?'🌿':pctRes>0?'🌱':'⚠️'
-    msg += emojR + ' Reserva de emerg\u00eancia: *' + pctRes + '%*'
-    if (pctRes>=100) msg += ' \u2014 jardim protegido!\n'
-    else if (pctRes>=50) msg += ' \u2014 mais da metade!\n'
-    else if (pctRes>0) msg += ' \u2014 continue crescendo\n'
-    else msg += ' \u2014 prioridade m\u00e1xima!\n'
-    msg += '🏦 Patrim\u00f4nio l\u00edquido: *' + fmt(saldoBancos + reserva.atual) + '*'
-    await sendMessage(chatId, msg)
-    // Dica do Claude
-    const ctxMetas = (metas||[]).map(mt => { const at=mt.valor_atual||mt.atual||0; const pc=mt.valor_alvo>0?Math.round((at/mt.valor_alvo)*100):0; return mt.nome+': '+pc+'% ('+fmt(at)+' de '+fmt(mt.valor_alvo)+')' }).join(', ')
-    const promptClaude = 'Casal brasileiro, dados do mes:\nReceitas: '+fmt(totalRec)+'\nGastos: '+fmt(totalDesp)+'\nSaldo: '+fmt(saldo)+'\nTaxa de poupanca: '+taxaPoupanca+'%\nReserva emergencia: '+pctRes+'% de '+fmt(reserva.meta)+'\nMetas: '+(ctxMetas||'nenhuma')+'\nObjetivo: '+(user.objetivo||'controle')+'\n\nAnalise a situacao e de 2-3 dicas educativas e motivadoras para esta semana. Priorize reserva se < 100%. Use metaforas de jardim. Maximo 4 frases.'
-    const dicaClaude = await chamarClaude(promptClaude)
-    if (dicaClaude?.trim()) await sendMessage(chatId, '🌱 *Broto analisa:*\n\n' + dicaClaude.trim())
-    await sendMessageButtons(chatId, 'O que deseja fazer?', [
+    msg += emojR + ' Reserva: *' + pctRes + '%* de ' + fmt(reserva.meta) + '
+'
+    msg += '🏦 Patrimônio líquido: *' + fmt(saldoBancos + reserva.atual) + '*
+
+'
+
+    // Top 5 categorias
+    msg += '━━━━━━━━━━━━━━━━
+'
+    msg += '🔍 *Top 5 categorias:*
+'
+    top5.forEach(([cat,dados],i) => {
+      const pct = totalDesp > 0 ? Math.round((dados.total/totalDesp)*100) : 0
+      const antVal = catMapAnt[cat] || 0
+      const trend = antVal > 0 ? (dados.total > antVal*1.1 ? ' ↑' : dados.total < antVal*0.9 ? ' ↓' : '') : ''
+      msg += (i+1) + '. ' + cat + ': *' + fmt(dados.total) + '* (' + pct + '%)' + trend + '
+'
+    })
+
+    if (totalImprevistos > 0) {
+      const pctImp = totalDesp > 0 ? Math.round((totalImprevistos/totalDesp)*100) : 0
+      msg += '
+⚡ Gastos imprevistos: *' + fmt(totalImprevistos) + '* (' + pctImp + '% do total)
+'
+    }
+
+    await sendMessage(user.telegram_id, msg)
+
+    // Análise profunda com Claude
+    await sendAction(chatId, 'typing')
+
+    const ctxMetas = (metas||[]).map(mt => {
+      const at = mt.valor_atual||mt.atual||0
+      const pc = mt.valor_alvo>0?Math.round((at/mt.valor_alvo)*100):0
+      return mt.nome + ': ' + pc + '%'
+    }).join(', ')
+
+    const ctxCats = top5.map(([cat,d]) => {
+      const antVal = catMapAnt[cat] || 0
+      const trend = antVal > 0 ? (d.total>antVal*1.1?'subiu '+(Math.round(((d.total-antVal)/antVal)*100))+'%':d.total<antVal*0.9?'caiu '+(Math.round(((antVal-d.total)/antVal)*100))+'%':'estável') : 'novo'
+      return cat + ': R$' + d.total.toFixed(0) + ' (' + d.qtd + ' lançamentos, ' + trend + ')'
+    }).join('
+')
+
+    const promptClaude =
+      'Casal brasileiro com objetivo de ' + (user.objetivo||'liberdade financeira') + '.
+
+' +
+      'DADOS DO MÊS (' + MESES[m] + '):
+' +
+      'Receita: ' + fmt(totalRec) + '
+' +
+      'Gastos: ' + fmt(totalDesp) + '
+' +
+      'Saldo: ' + fmt(saldo) + '
+' +
+      'Taxa poupança: ' + taxaPoupanca + '%
+' +
+      'Reserva emergência: ' + pctRes + '% de ' + fmt(reserva.meta) + '
+' +
+      'Gastos imprevistos: ' + fmt(totalImprevistos) + ' (' + imprevistos.length + ' ocorrências)
+
+' +
+      'TOP CATEGORIAS:
+' + ctxCats + '
+
+' +
+      'METAS ATIVAS:
+' + (ctxMetas||'nenhuma') + '
+
+' +
+      'INSTRUÇÕES:
+' +
+      '1. Identifique 2-3 padrões preocupantes ou positivos nos dados
+' +
+      '2. Faça uma projeção: se mantiverem esse ritmo, o que acontece em 3 meses?
+' +
+      '3. Sugira 1-2 ajustes concretos e específicos para o próximo mês
+' +
+      '4. Conecte tudo ao objetivo de ' + (user.objetivo||'liberdade financeira') + '
+' +
+      'Use metáforas de jardim. Seja direto, caloroso e específico com os números. Máximo 6 frases.'
+
+    const analise = await chamarClaude(promptClaude)
+
+    if (analise?.trim()) {
+      await sendMessage(user.telegram_id, '🌱 *Broto analisa:*
+
+' + analise.trim())
+    }
+
+    // Planejamento do próximo mês
+    await sendAction(chatId, 'typing')
+    const promptPlan =
+      'Com base nos dados de ' + MESES[m] + ', sugira um PLANEJAMENTO CONCRETO para ' + MESES[(m+1)%12] + '.
+' +
+      'Receita esperada: ' + fmt(totalRec) + '
+' +
+      'Maior gasto: ' + (top5[0]?top5[0][0]+' R$'+top5[0][1].total.toFixed(0):'sem dados') + '
+' +
+      'Objetivo: ' + (user.objetivo||'liberdade financeira') + '
+' +
+      'Reserva atual: ' + pctRes + '%
+
+' +
+      'Dê 3 metas numéricas específicas para o próximo mês. Ex: "Reduzir Assinaturas de R$935 para R$700 — revisar cada serviço". ' +
+      'Seja direto e prático. Máximo 4 frases.'
+
+    const plano = await chamarClaude(promptPlan)
+
+    if (plano?.trim()) {
+      await sendMessage(user.telegram_id, '🗓 *Planejamento para ' + MESES[(m+1)%12] + ':*
+
+' + plano.trim())
+    }
+
+    await sendMessageButtons(user.telegram_id, 'O que deseja fazer?', [
       [{ text:'🎯 Ver metas', callback_data:'menu_metas' },{ text:'🛡 Reserva', callback_data:'menu_reserva' }],
       [{ text:'🔙 Menu', callback_data:'menu_inicio' }],
     ])
