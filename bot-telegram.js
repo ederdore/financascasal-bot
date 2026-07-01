@@ -444,64 +444,35 @@ async function handleMenuCallback(callbackData, user, chatId) {
       .select('nome,valor_alvo,valor_atual,atual').eq('casal_code',user.casal_code).eq('ativa',true)
 
     // Monta mensagem base
-    let msg = '📊 *Resumo de ' + MESES[m] + '*
-
-'
-    msg += '💰 Receitas: *' + fmt(totalRec) + '*
-'
-    msg += '💸 Gastos: *' + fmt(totalDesp) + '*'
-    if (totalAnt > 0) {
-      const diffAnt = totalDesp - totalAnt
-      msg += ' (' + (diffAnt > 0 ? '+' : '') + fmt(diffAnt) + ' vs ' + MESES[mAnt] + ')'
-    }
-    msg += '
-'
-    msg += (saldo>=0?'✅':'🔴') + ' Saldo: *' + fmt(saldo) + '*
-
-'
-
-    // Inteligência financeira
-    msg += '━━━━━━━━━━━━━━━━
-'
-    msg += '📈 *Inteligência financeira:*
-
-'
-
-    const emojP = taxaPoupanca>=20?'🌟':taxaPoupanca>=10?'🌿':taxaPoupanca>=0?'🌱':'🔴'
-    msg += emojP + ' Taxa de poupança: *' + taxaPoupanca + '%*'
-    msg += taxaPoupanca>=20?' — excelente!
-':taxaPoupanca>=10?' — bom caminho!
-':taxaPoupanca>=0?' — pode melhorar
-':' — mês no vermelho
-'
-
-    const emojR = pctRes>=100?'🛡':pctRes>=50?'🌿':pctRes>0?'🌱':'⚠️'
-    msg += emojR + ' Reserva: *' + pctRes + '%* de ' + fmt(reserva.meta) + '
-'
-    msg += '🏦 Patrimônio líquido: *' + fmt(saldoBancos + reserva.atual) + '*
-
-'
-
-    // Top 5 categorias
-    msg += '━━━━━━━━━━━━━━━━
-'
-    msg += '🔍 *Top 5 categorias:*
-'
+    let msg = '\U0001f4ca *Resumo de ' + MESES[m] + '*\n\n'
+    msg += '\U0001f4b0 Receitas: *' + fmt(totalRec) + '*\n'
+    msg += '\U0001f4b8 Gastos: *' + fmt(totalDesp) + '*'
+    if (totalAnt > 0) { const diffAnt = totalDesp - totalAnt; msg += ' (' + (diffAnt>0?'+':'') + fmt(diffAnt) + ' vs ' + MESES[mAnt] + ')' }
+    msg += '\n'
+    msg += (saldo>=0?'\u2705':'\U0001f534') + ' Saldo: *' + fmt(saldo) + '*\n\n'
+    msg += '\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n'
+    msg += '\U0001f4c8 *Inteligencia financeira:*\n\n'
+    const emojP = taxaPoupanca>=20?'\U0001f31f':taxaPoupanca>=10?'\U0001f33f':taxaPoupanca>=0?'\U0001f331':'\U0001f534'
+    msg += emojP + ' Taxa de poupanca: *' + taxaPoupanca + '%*'
+    if (taxaPoupanca>=20) msg += ' \u2014 excelente!\n'
+    else if (taxaPoupanca>=10) msg += ' \u2014 bom caminho!\n'
+    else if (taxaPoupanca>=0) msg += ' \u2014 pode melhorar\n'
+    else msg += ' \u2014 mes no vermelho\n'
+    const emojR = pctRes>=100?'\U0001f6e1':pctRes>=50?'\U0001f33f':pctRes>0?'\U0001f331':'\u26a0\ufe0f'
+    msg += emojR + ' Reserva: *' + pctRes + '%* de ' + fmt(reserva.meta) + '\n'
+    msg += '\U0001f3e6 Patrimonio: *' + fmt(saldoBancos + reserva.atual) + '*\n\n'
+    msg += '\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n'
+    msg += '\U0001f50d *Top 5 categorias:*\n'
     top5.forEach(([cat,dados],i) => {
       const pct = totalDesp > 0 ? Math.round((dados.total/totalDesp)*100) : 0
       const antVal = catMapAnt[cat] || 0
-      const trend = antVal > 0 ? (dados.total > antVal*1.1 ? ' ↑' : dados.total < antVal*0.9 ? ' ↓' : '') : ''
-      msg += (i+1) + '. ' + cat + ': *' + fmt(dados.total) + '* (' + pct + '%)' + trend + '
-'
+      const trend = antVal > 0 ? (dados.total > antVal*1.1 ? ' \u2191' : dados.total < antVal*0.9 ? ' \u2193' : '') : ''
+      msg += (i+1) + '. ' + cat + ': *' + fmt(dados.total) + '* (' + pct + '%)' + trend + '\n'
     })
-
     if (totalImprevistos > 0) {
       const pctImp = totalDesp > 0 ? Math.round((totalImprevistos/totalDesp)*100) : 0
-      msg += '
-⚡ Gastos imprevistos: *' + fmt(totalImprevistos) + '* (' + pctImp + '% do total)
-'
+      msg += '\n\u26a1 Gastos imprevistos: *' + fmt(totalImprevistos) + '* (' + pctImp + '% do total)\n'
     }
-
     await sendMessage(user.telegram_id, msg)
 
     // Análise profunda com Claude
@@ -517,87 +488,47 @@ async function handleMenuCallback(callbackData, user, chatId) {
       const antVal = catMapAnt[cat] || 0
       const trend = antVal > 0 ? (d.total>antVal*1.1?'subiu '+(Math.round(((d.total-antVal)/antVal)*100))+'%':d.total<antVal*0.9?'caiu '+(Math.round(((antVal-d.total)/antVal)*100))+'%':'estável') : 'novo'
       return cat + ': R$' + d.total.toFixed(0) + ' (' + d.qtd + ' lançamentos, ' + trend + ')'
-    }).join('
-')
+    }).join('\n')
 
-    const promptClaude =
-      'Casal brasileiro com objetivo de ' + (user.objetivo||'liberdade financeira') + '.
-
-' +
-      'DADOS DO MÊS (' + MESES[m] + '):
-' +
-      'Receita: ' + fmt(totalRec) + '
-' +
-      'Gastos: ' + fmt(totalDesp) + '
-' +
-      'Saldo: ' + fmt(saldo) + '
-' +
-      'Taxa poupança: ' + taxaPoupanca + '%
-' +
-      'Reserva emergência: ' + pctRes + '% de ' + fmt(reserva.meta) + '
-' +
-      'Gastos imprevistos: ' + fmt(totalImprevistos) + ' (' + imprevistos.length + ' ocorrências)
-
-' +
-      'TOP CATEGORIAS:
-' + ctxCats + '
-
-' +
-      'METAS ATIVAS:
-' + (ctxMetas||'nenhuma') + '
-
-' +
-      'INSTRUÇÕES:
-' +
-      '1. Identifique 2-3 padrões preocupantes ou positivos nos dados
-' +
-      '2. Faça uma projeção: se mantiverem esse ritmo, o que acontece em 3 meses?
-' +
-      '3. Sugira 1-2 ajustes concretos e específicos para o próximo mês
-' +
-      '4. Conecte tudo ao objetivo de ' + (user.objetivo||'liberdade financeira') + '
-' +
-      'Use metáforas de jardim. Seja direto, caloroso e específico com os números. Máximo 6 frases.'
-
+    const promptClaude = 'Casal brasileiro com objetivo de ' + (user.objetivo||'liberdade financeira') + '.\n\n' +
+      'DADOS DO MES (' + MESES[m] + '):\n' +
+      'Receita: ' + fmt(totalRec) + '\n' +
+      'Gastos: ' + fmt(totalDesp) + '\n' +
+      'Saldo: ' + fmt(saldo) + '\n' +
+      'Taxa poupanca: ' + taxaPoupanca + '%\n' +
+      'Reserva emergencia: ' + pctRes + '% de ' + fmt(reserva.meta) + '\n' +
+      'Gastos imprevistos: ' + fmt(totalImprevistos) + ' (' + imprevistos.length + ' ocorrencias)\n\n' +
+      'TOP CATEGORIAS:\n' + ctxCats + '\n\n' +
+      'METAS ATIVAS:\n' + (ctxMetas||'nenhuma') + '\n\n' +
+      'Identifique 2-3 padroes preocupantes ou positivos. ' +
+      'Faca uma projecao: se mantiverem esse ritmo, o que acontece em 3 meses? ' +
+      'Sugira 1-2 ajustes concretos para o proximo mes. ' +
+      'Use metaforas de jardim. Seja direto e especifico com numeros. Maximo 6 frases.'
     const analise = await chamarClaude(promptClaude)
 
     if (analise?.trim()) {
-      await sendMessage(user.telegram_id, '🌱 *Broto analisa:*
-
-' + analise.trim())
+      await sendMessage(user.telegram_id, '\U0001f331 *Broto analisa:*\n\n' + analise.trim())
     }
 
-    // Planejamento do próximo mês
+    // Planejamento do proximo mes
     await sendAction(chatId, 'typing')
-    const promptPlan =
-      'Com base nos dados de ' + MESES[m] + ', sugira um PLANEJAMENTO CONCRETO para ' + MESES[(m+1)%12] + '.
-' +
-      'Receita esperada: ' + fmt(totalRec) + '
-' +
-      'Maior gasto: ' + (top5[0]?top5[0][0]+' R$'+top5[0][1].total.toFixed(0):'sem dados') + '
-' +
-      'Objetivo: ' + (user.objetivo||'liberdade financeira') + '
-' +
-      'Reserva atual: ' + pctRes + '%
-
-' +
-      'Dê 3 metas numéricas específicas para o próximo mês. Ex: "Reduzir Assinaturas de R$935 para R$700 — revisar cada serviço". ' +
-      'Seja direto e prático. Máximo 4 frases.'
-
+    const promptPlan = 'Com base nos dados de ' + MESES[m] + ', sugira um PLANEJAMENTO CONCRETO para ' + MESES[(m+1)%12] + '.\n' +
+      'Receita esperada: ' + fmt(totalRec) + '\n' +
+      'Maior gasto: ' + (top5[0]?top5[0][0]+' R$'+top5[0][1].total.toFixed(0):'sem dados') + '\n' +
+      'Objetivo: ' + (user.objetivo||'liberdade financeira') + '\n' +
+      'Reserva atual: ' + pctRes + '%\n' +
+      'De 3 metas numericas especificas para o proximo mes. Seja direto e pratico. Maximo 4 frases.'
     const plano = await chamarClaude(promptPlan)
-
     if (plano?.trim()) {
-      await sendMessage(user.telegram_id, '🗓 *Planejamento para ' + MESES[(m+1)%12] + ':*
-
-' + plano.trim())
+      await sendMessage(user.telegram_id, '\U0001f5d3 *Planejamento para ' + MESES[(m+1)%12] + ':*\n\n' + plano.trim())
     }
-
     await sendMessageButtons(user.telegram_id, 'O que deseja fazer?', [
-      [{ text:'🎯 Ver metas', callback_data:'menu_metas' },{ text:'🛡 Reserva', callback_data:'menu_reserva' }],
-      [{ text:'🔙 Menu', callback_data:'menu_inicio' }],
+      [{ text:'\U0001f3af Ver metas', callback_data:'menu_metas' },{ text:'\U0001f6e1 Reserva', callback_data:'menu_reserva' }],
+      [{ text:'\U0001f519 Menu', callback_data:'menu_inicio' }],
     ])
     return
   }
+
 
 
   if (callbackData === 'menu_fatura') {
